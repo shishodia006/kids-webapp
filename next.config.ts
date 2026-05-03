@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  output: "export",   // 👈 yeh line add karo
+  // output: "export",  
   images: {
     unoptimized: true,
   },
