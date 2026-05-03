@@ -44,16 +44,7 @@ export default function BrandPanel() {
   }
 
   if (!isAuthed) {
-    return (
-      <LoginShell
-        title="Konnectly Business"
-        subtitle="Login to manage vouchers, referrals, partnerships and profile."
-        email={BRAND_EMAIL}
-        password={BRAND_PASSWORD}
-        error={error}
-        onSubmit={login}
-      />
-    );
+    return <LoginShell error={error} onSubmit={login} />;
   }
 
   return (
@@ -329,25 +320,37 @@ Let's grow the community together! 💜`;
   );
 }
 
-function LoginShell({ title, subtitle, email, password, error, onSubmit }: { title: string; subtitle: string; email: string; password: string; error: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function LoginShell({ error, onSubmit }: { error: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-[#f7f7fb] px-5 py-8">
-      <form onSubmit={onSubmit} className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-        <h1 className="text-3xl font-black">{title}</h1>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">{subtitle}</p>
-        <div className="mt-6 rounded-xl bg-violet-50 p-3 text-xs text-violet-800">
-          Demo ID: <b>{email}</b><br />Password: <b>{password}</b>
+    <main className="grid min-h-screen place-items-center bg-[#fff9ec] px-5">
+      <form onSubmit={onSubmit} className="w-full max-w-md rounded-[30px] bg-white/80 p-8 shadow-xl backdrop-blur-md">
+        <p className="text-xs font-semibold tracking-widest text-purple-600">WELCOME BACK</p>
+        <h1 className="mt-2 text-5xl font-black text-black">Login</h1>
+        <p className="mt-3 text-sm leading-relaxed text-gray-600">
+          Use your email or mobile number, then confirm with WhatsApp OTP.
+        </p>
+        <input
+          name="email"
+          type="text"
+          placeholder="Enter mobile or email"
+          className="mt-6 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-purple-400"
+        />
+        <input
+          name="password"
+          type="password"
+          placeholder="Enter password / OTP"
+          className="mt-4 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-purple-400"
+        />
+        <div className="mt-4 rounded-xl bg-green-100 px-4 py-3 text-sm text-green-700">
+          <span className="font-semibold">WhatsApp</span> - An OTP will be sent to your registered WhatsApp number.
         </div>
-        <label className="mt-5 grid gap-2 text-sm font-bold">
-          Email
-          <input name="email" className="rounded-xl border px-4 py-3 font-normal outline-none focus:border-violet-500" placeholder={email} type="email" />
-        </label>
-        <label className="mt-4 grid gap-2 text-sm font-bold">
-          Password
-          <input name="password" className="rounded-xl border px-4 py-3 font-normal outline-none focus:border-violet-500" placeholder={password} type="password" />
-        </label>
-        {error && <p className="mt-3 text-sm font-bold text-red-600">{error}</p>}
-        <button className="mt-5 w-full rounded-xl bg-violet-700 py-3 font-black text-white" type="submit">Login</button>
+        {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
+        <button type="submit" className="mt-6 w-full rounded-full bg-black py-4 text-base font-bold text-yellow-400 transition hover:opacity-90">
+          Send OTP & Login
+        </button>
+        <p className="mt-6 text-center text-sm text-gray-600">
+          NEW HERE? <span className="cursor-pointer font-semibold text-purple-600">CREATE ACCOUNT</span>
+        </p>
       </form>
     </main>
   );
