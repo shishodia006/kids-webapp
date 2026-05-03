@@ -20,8 +20,8 @@ export default function Home() {
 
   return (
     <iframe
-      src="/landing.html"
-      title="Konnectly landing page"
+      src="/index.html"
+      title="Konnectly page"
       className="h-screen w-full border-0"
     />
   );
