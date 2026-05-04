@@ -11,6 +11,23 @@ type OtpResponse = {
   expiresAt: number;
   message: string;
 };
+type RegisterDetails = {
+  fatherName: string;
+  motherName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  alternateMobile: string;
+  address: string;
+  locality: string;
+  city: string;
+  state: string;
+  pincode: string;
+  childName: string;
+  childAge: string;
+  school: string;
+  referralCode: string;
+};
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -19,6 +36,23 @@ export default function RegisterPage() {
   const verifyingRef = useRef(false);
   const [step, setStep] = useState<RegisterStep>("details");
   const [primaryPhone, setPrimaryPhone] = useState("");
+  const [details, setDetails] = useState<RegisterDetails>({
+    fatherName: "",
+    motherName: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    alternateMobile: "",
+    address: "",
+    locality: "",
+    city: "",
+    state: "",
+    pincode: "",
+    childName: "",
+    childAge: "",
+    school: "",
+    referralCode: "",
+  });
   const [requestId, setRequestId] = useState("");
   const [expiresAt, setExpiresAt] = useState(0);
   const [otp, setOtp] = useState(Array(6).fill(""));
@@ -52,7 +86,7 @@ export default function RegisterPage() {
       const response = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: normalizedPhone, purpose: "register" }),
+        body: JSON.stringify({ phone: normalizedPhone, purpose: "register", registration: details }),
       });
       const data = (await response.json()) as Partial<OtpResponse>;
 
@@ -85,7 +119,7 @@ export default function RegisterPage() {
       const response = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: normalizedPhone, purpose: "register", requestId, code: otpCode }),
+        body: JSON.stringify({ phone: normalizedPhone, purpose: "register", requestId, code: otpCode, registration: details }),
       });
       const data = (await response.json()) as { message?: string };
 
@@ -136,7 +170,9 @@ export default function RegisterPage() {
         {step === "details" ? (
           <DetailsForm
             loading={loading}
+            details={details}
             primaryPhone={primaryPhone}
+            setDetails={setDetails}
             setPrimaryPhone={setPrimaryPhone}
             status={status}
             onSubmit={sendOtp}
@@ -199,17 +235,25 @@ function StatusBar() {
 
 function DetailsForm({
   loading,
+  details,
   primaryPhone,
+  setDetails,
   setPrimaryPhone,
   status,
   onSubmit,
 }: {
   loading: boolean;
+  details: RegisterDetails;
   primaryPhone: string;
+  setDetails: (value: RegisterDetails) => void;
   setPrimaryPhone: (value: string) => void;
   status: string;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  function updateDetail(key: keyof RegisterDetails, value: string) {
+    setDetails({ ...details, [key]: value });
+  }
+
   return (
     <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
       <section className="relative overflow-hidden bg-[#5444bf] px-6 pb-7 pt-7 text-white">
@@ -227,19 +271,31 @@ function DetailsForm({
 
       <form onSubmit={onSubmit} className="-mt-1 rounded-t-[24px] bg-[#f7f5ff] px-5 pb-7 pt-5 sm:px-6">
         <div className="grid gap-3.5">
-          <Field label="Father's Full Name" required placeholder="e.g. Rahul Sharma" />
-          <Field label="Mother's Full Name" required placeholder="e.g. Priya Sharma" />
+          <Field label="Father's Full Name" required placeholder="e.g. Rahul Sharma" value={details.fatherName} onChange={(value) => updateDetail("fatherName", value)} />
+          <Field label="Mother's Full Name" required placeholder="e.g. Priya Sharma" value={details.motherName} onChange={(value) => updateDetail("motherName", value)} />
+          <Field label="Email" placeholder="parent@example.com" value={details.email} onChange={(value) => updateDetail("email", value)} type="email" />
           <PhoneField label="Primary WhatsApp Number" value={primaryPhone} onChange={setPrimaryPhone} />
-          <PhoneField label="Alternate Number" />
-          <Field label="Home Address" required placeholder="Flat / House No., Building, Street..." tall />
+          <Field label="Password" required placeholder="Minimum 8 characters" value={details.password} onChange={(value) => updateDetail("password", value)} type="password" minLength={8} />
+          <Field
+            label="Confirm Password"
+            required
+            placeholder="Re-enter password"
+            value={details.confirmPassword}
+            onChange={(value) => updateDetail("confirmPassword", value)}
+            type="password"
+            minLength={8}
+          />
+          <PhoneField label="Alternate Number" value={details.alternateMobile} onChange={(value) => updateDetail("alternateMobile", value)} required={false} />
+          <Field label="Home Address" required placeholder="Flat / House No., Building, Street..." tall value={details.address} onChange={(value) => updateDetail("address", value)} />
 
           <div className="grid gap-3 min-[370px]:grid-cols-[1.35fr_1fr]">
             <label className="grid min-w-0 gap-1 text-[11px] font-black text-[#2f2b55]">
               <span>Locality <Required /></span>
               <select
                 required
+                value={details.locality}
+                onChange={(event) => updateDetail("locality", event.target.value)}
                 className="h-12 w-full min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-black text-[#2f2b55] outline-none focus:border-[#6655cf]"
-                defaultValue=""
               >
                 <option value="" disabled>
                   Select...
@@ -250,8 +306,25 @@ function DetailsForm({
                 <option>Sector 50</option>
               </select>
             </label>
-            <Field label="Pincode" required placeholder="122001" />
+            <Field label="Pincode" required placeholder="122001" value={details.pincode} onChange={(value) => updateDetail("pincode", value)} />
           </div>
+          <div className="grid gap-3 min-[370px]:grid-cols-[1.35fr_0.75fr]">
+            <Field label="Child's Full Name" required placeholder="e.g. Aarav Sharma" value={details.childName} onChange={(value) => updateDetail("childName", value)} />
+            <Field
+              label="Age"
+              required
+              placeholder="8"
+              value={details.childAge}
+              onChange={(value) => {
+                const age = Number(value.replace(/\D/g, "").slice(0, 2));
+                updateDetail("childAge", age > 18 ? "18" : age > 0 ? String(age) : "");
+              }}
+              type="number"
+              min={1}
+              max={18}
+            />
+          </div>
+          <Field label="School Name" placeholder="e.g. DPS R.K. Puram" value={details.school} onChange={(value) => updateDetail("school", value)} />
 
           <div className="rounded-[18px] border-2 border-[#ead387] bg-[#fff7d8] p-3">
             <div className="flex flex-wrap items-center gap-2 text-[11px] font-black text-[#bd8900]">
@@ -261,6 +334,8 @@ function DetailsForm({
               </span>
             </div>
             <input
+              value={details.referralCode}
+              onChange={(event) => updateDetail("referralCode", event.target.value.toUpperCase())}
               className="mt-2.5 h-12 w-full min-w-0 rounded-2xl border-2 border-[#eadca7] bg-white px-3.5 font-mono text-xs font-black uppercase tracking-[0.12em] outline-none placeholder:text-[#77777c] focus:border-[#c99a00]"
               placeholder="e.g. KK-7X92M"
               type="text"
@@ -269,7 +344,20 @@ function DetailsForm({
         </div>
 
         <button
-          disabled={loading || primaryPhone.replace(/\D/g, "").slice(-10).length !== 10}
+          disabled={
+            loading ||
+            primaryPhone.replace(/\D/g, "").slice(-10).length !== 10 ||
+            !details.fatherName.trim() ||
+            !details.motherName.trim() ||
+            details.password.length < 8 ||
+            details.password !== details.confirmPassword ||
+            !details.childName.trim() ||
+            Number(details.childAge) < 1 ||
+            Number(details.childAge) > 18 ||
+            !details.address.trim() ||
+            !details.locality.trim() ||
+            !details.pincode.trim()
+          }
           type="submit"
           className="mt-6 w-full rounded-full bg-[#6655cf] px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-[#6655cf]/30 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55"
         >
@@ -398,7 +486,29 @@ function DecorativeShapes() {
   );
 }
 
-function Field({ label, placeholder, required, tall }: { label: string; placeholder: string; required?: boolean; tall?: boolean }) {
+function Field({
+  label,
+  placeholder,
+  required,
+  tall,
+  value,
+  onChange,
+  type = "text",
+  min,
+  max,
+  minLength,
+}: {
+  label: string;
+  placeholder: string;
+  required?: boolean;
+  tall?: boolean;
+  value: string;
+  onChange: (value: string) => void;
+  type?: string;
+  min?: number;
+  max?: number;
+  minLength?: number;
+}) {
   return (
     <label className="grid min-w-0 gap-1 text-[11px] font-black text-[#2f2b55]">
       <span>
@@ -406,8 +516,13 @@ function Field({ label, placeholder, required, tall }: { label: string; placehol
       </span>
       <input
         required={required}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        type="text"
+        type={type}
+        min={min}
+        max={max}
+        minLength={minLength}
         className={`${tall ? "h-16" : "h-12"} w-full min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none placeholder:text-xs placeholder:text-[#77777c] focus:border-[#6655cf]`}
       />
     </label>
@@ -418,20 +533,22 @@ function PhoneField({
   label,
   value,
   onChange,
+  required = true,
 }: {
   label: string;
   value?: string;
   onChange?: (value: string) => void;
+  required?: boolean;
 }) {
   return (
     <label className="grid min-w-0 gap-1 text-[11px] font-black text-[#2f2b55]">
       <span>
-        {label} <Required />
+        {label} {required && <Required />}
       </span>
       <div className="grid min-w-0 grid-cols-[64px_minmax(0,1fr)] gap-2 sm:grid-cols-[70px_minmax(0,1fr)]">
         <div className="grid h-12 place-items-center rounded-2xl border-2 border-[#e3e0f4] bg-white text-xs font-black">IN +91</div>
         <input
-          required
+          required={required}
           value={value}
           onChange={(event) => onChange?.(event.target.value)}
           pattern="[0-9 ]{10,13}"

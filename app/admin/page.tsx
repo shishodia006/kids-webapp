@@ -17,7 +17,8 @@ import {
   Trophy,
   X,
 } from "lucide-react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import type { AdminBrand, AdminData, AdminEvent, AdminKid, AdminMember, AdminParticipant, AdminRedemption } from "@/lib/admin-data";
 
 const ADMIN_EMAIL = "admin@konnectly.com";
 const ADMIN_PASSWORD = "Admin@123";
@@ -165,6 +166,28 @@ export default function AdminPage() {
   const [error, setError] = useState("");
   const [comingSoon, setComingSoon] = useState<"Analytics" | "Settings" | null>(null);
   const [referralSettingsOpen, setReferralSettingsOpen] = useState(false);
+  const [data, setData] = useState<AdminData | null>(null);
+  const [status, setStatus] = useState("Loading admin data...");
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  async function loadData() {
+    try {
+      const response = await fetch("/api/admin/data", { cache: "no-store" });
+      if (response.status === 401) {
+        window.location.href = "/login?next=/admin";
+        return;
+      }
+      const nextData = await response.json();
+      if (!response.ok) throw new Error(nextData.message || "Unable to load admin data.");
+      setData(nextData);
+      setStatus("");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to load admin data.");
+    }
+  }
 
   function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -245,11 +268,12 @@ export default function AdminPage() {
         <section className="min-w-0 lg:ml-[240px]">
           <DashboardHeader section={activeSection} onReferralSettings={() => setReferralSettingsOpen(true)} />
           <div className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:pt-[98px]">
-            {activeSection === "Memberships" && <Memberships />}
-            {activeSection === "Activities" && <Activities />}
-            {activeSection === "Promotions & Updates" && <Promotions />}
-            {activeSection === "Business" && <Business />}
-            {activeSection === "Referral Dashboard" && <ReferralDashboard />}
+            {status && <Panel><p className="font-black text-[#5b45d1]">{status}</p></Panel>}
+            {data && activeSection === "Memberships" && <Memberships data={data} onRefresh={loadData} />}
+            {data && activeSection === "Activities" && <Activities data={data} onRefresh={loadData} />}
+            {data && activeSection === "Promotions & Updates" && <Promotions data={data} onRefresh={loadData} />}
+            {data && activeSection === "Business" && <Business data={data} onRefresh={loadData} />}
+            {data && activeSection === "Referral Dashboard" && <ReferralDashboard data={data} />}
           </div>
         </section>
       </div>
@@ -286,22 +310,22 @@ function DashboardHeader({ section, onReferralSettings }: { section: Section; on
   );
 }
 
-function Memberships() {
+function Memberships({ data, onRefresh }: { data: AdminData; onRefresh: () => Promise<void> }) {
   const [membershipTab, setMembershipTab] = useState(0);
 
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard title="Parent Members" value="128" note="+ 12 this month" tone="dark" />
-        <StatCard title="Kids Members" value="201" note="+ 18 this month" tone="purple" />
-        <StatCard title="Pending Approvals" value="4" note="Kid profiles awaiting" tone="amber" />
-        <StatCard title="Active Memberships" value="114" note="+ 8% MoM" tone="dark" />
+        <StatCard title="Parent Members" value={String(data.stats.parents)} note="Live from database" tone="dark" />
+        <StatCard title="Kids Members" value={String(data.stats.kids)} note="Live from database" tone="purple" />
+        <StatCard title="Pending Approvals" value={String(data.stats.pendingKids)} note="Kid profiles awaiting" tone="amber" />
+        <StatCard title="Active Memberships" value={String(data.stats.activeKids)} note="Approved kids" tone="dark" />
       </div>
 
       <SegmentedTabs
         tabs={["Active Memberships", "Pending Approvals"]}
         activeIndex={membershipTab}
-        badge={`${pendingApprovals.length}`}
+        badge={`${data.pendingKids.length}`}
         onSelect={setMembershipTab}
       />
 
@@ -319,7 +343,8 @@ function Memberships() {
           </div>
 
           <div className="space-y-4">
-            {members.map((member) => (
+            {data.members.length === 0 && <Panel><p className="font-black text-[#8f8ba6]">No parent members yet.</p></Panel>}
+            {data.members.map((member) => (
               <MemberCard key={member.code} member={member} />
             ))}
           </div>
@@ -329,32 +354,35 @@ function Memberships() {
           <div className="rounded-2xl border-2 border-[#e6b800] bg-[#fff6c9] px-5 py-4 text-sm font-black text-[#c98b00]">
             Warning: Parent profiles are auto-approved. Kid profiles require manual approval. Tap any card to view full profile and take action.
           </div>
-          <PendingApprovals />
+          <PendingApprovals profiles={data.pendingKids} onRefresh={onRefresh} />
         </div>
       )}
     </div>
   );
 }
 
-function PendingApprovals() {
-  const [openId, setOpenId] = useState(pendingApprovals[0]?.name ?? "");
+function PendingApprovals({ profiles, onRefresh }: { profiles: AdminKid[]; onRefresh: () => Promise<void> }) {
+  const [openId, setOpenId] = useState(profiles[0]?.name ?? "");
   const [statusByName, setStatusByName] = useState<Record<string, "pending" | "approved" | "rejected">>({});
 
-  function updateStatus(name: string, status: "approved" | "rejected") {
-    setStatusByName((current) => ({ ...current, [name]: status }));
+  async function updateStatus(profile: AdminKid, status: "approved" | "rejected") {
+    await postJson("/api/admin/kids/status", { kidId: profile.id, status });
+    setStatusByName((current) => ({ ...current, [profile.name]: status }));
+    await onRefresh();
   }
 
   return (
     <div className="space-y-4">
-      {pendingApprovals.map((profile) => (
+      {profiles.length === 0 && <Panel><p className="font-black text-[#8f8ba6]">No pending approvals.</p></Panel>}
+      {profiles.map((profile) => (
         <PendingApprovalCard
           key={profile.name}
           profile={profile}
           isOpen={openId === profile.name}
           status={statusByName[profile.name] ?? "pending"}
           onToggle={() => setOpenId((current) => (current === profile.name ? "" : profile.name))}
-          onApprove={() => updateStatus(profile.name, "approved")}
-          onReject={() => updateStatus(profile.name, "rejected")}
+          onApprove={() => updateStatus(profile, "approved")}
+          onReject={() => updateStatus(profile, "rejected")}
         />
       ))}
     </div>
@@ -369,7 +397,7 @@ function PendingApprovalCard({
   onApprove,
   onReject,
 }: {
-  profile: (typeof pendingApprovals)[number];
+  profile: AdminKid;
   isOpen: boolean;
   status: "pending" | "approved" | "rejected";
   onToggle: () => void;
@@ -458,8 +486,16 @@ function InfoTile({ label, value, green }: { label: string; value: string; green
   );
 }
 
-function Activities() {
+function Activities({ data, onRefresh }: { data: AdminData; onRefresh: () => Promise<void> }) {
   const [activityTab, setActivityTab] = useState(0);
+
+  async function saveEvent(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await postJson("/api/admin/events", Object.fromEntries(form.entries()));
+    event.currentTarget.reset();
+    await onRefresh();
+  }
 
   return (
     <div className="space-y-5">
@@ -468,30 +504,45 @@ function Activities() {
         <>
           <h2 className="text-lg font-black sm:text-xl">Create New Activity</h2>
           <Panel>
+          <form onSubmit={saveEvent}>
             <div className="grid gap-4 lg:grid-cols-2">
-              <Field label="Activity Name *" placeholder="e.g. Summer Art Camp 2026" />
-              <Field label="Venue *" placeholder="e.g. DLF Phase 2, Community Hall" />
-              <Field label="Date *" type="date" />
-              <Field label="Time" type="time" />
-              <Field label="Registration Fee (Rs)" placeholder="0 for free" />
-              <Field label="Konnect Points Earned" placeholder="e.g. 50" />
-              <Field label="Max Participants" placeholder="Leave blank for unlimited" />
-              <SelectField label="Category" value="Arts & Crafts" />
+              <Field name="title" label="Activity Name *" placeholder="e.g. Summer Art Camp 2026" required />
+              <Field name="venue" label="Venue *" placeholder="e.g. DLF Phase 2, Community Hall" required />
+              <Field name="date" label="Date *" type="date" required />
+              <Field name="time" label="Time" type="time" />
+              <Field name="price" label="Registration Fee (Rs)" placeholder="0 for free" type="number" min={0} />
+              <Field name="points" label="Konnect Points Earned" placeholder="e.g. 50" type="number" min={0} />
+              <Field name="capacity" label="Max Participants" placeholder="Leave blank for unlimited" type="number" min={0} />
+              <SelectField name="category" label="Category" value="Arts & Crafts" />
             </div>
             <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <PillButton label="Save Activity" />
+              <PillButton label="Save Activity" submit />
               <PillButton label="Preview" muted />
             </div>
+          </form>
           </Panel>
+          <div className="grid gap-4 xl:grid-cols-2">
+            {data.events.map((item) => (
+              <Panel key={item.id}>
+                <h3 className="text-base font-black">{item.title}</h3>
+                <p className="mt-2 text-sm font-bold text-[#8f8ba6]">{item.date} - {item.venue}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Badge tone="soft">{item.category}</Badge>
+                  <Badge tone="gold">Rs {item.price}</Badge>
+                </div>
+              </Panel>
+            ))}
+          </div>
         </>
       ) : (
-        <LiveEventStatus />
+        <LiveEventStatus data={data} />
       )}
     </div>
   );
 }
 
-function LiveEventStatus() {
+function LiveEventStatus({ data }: { data: AdminData }) {
+  const liveTitle = data.events[0] ? `${data.events[0].title} - ${data.events[0].date}` : "No event selected";
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -501,16 +552,16 @@ function LiveEventStatus() {
             className="flex h-11 items-center justify-between gap-4 rounded-2xl border border-[#e7e1fb] bg-white px-5 text-sm font-black shadow-sm"
             type="button"
           >
-            Summer Art Camp 2026 - 15 May <ChevronDown size={17} />
+            {liveTitle} <ChevronDown size={17} />
           </button>
           <span className="w-fit rounded-full bg-green-100 px-4 py-2 text-xs font-black text-green-700">● Live</span>
         </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <StatCard title="Registered" value="24" note="" tone="dark" />
-        <StatCard title="Checked In" value="7" note="" tone="purple" />
-        <StatCard title="Payment Status" value="22/24" note="2 pending" tone="amber" />
+        <StatCard title="Registered" value={String(data.stats.registered)} note="" tone="dark" />
+        <StatCard title="Checked In" value={String(data.stats.checkedIn)} note="" tone="purple" />
+        <StatCard title="Payment Status" value={`${data.stats.paidBookings}/${data.stats.registered}`} note="paid bookings" tone="amber" />
       </div>
 
       <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
@@ -533,7 +584,7 @@ function LiveEventStatus() {
             </tr>
           </thead>
           <tbody>
-            {liveParticipants.map((participant, index) => (
+            {data.liveParticipants.map((participant, index) => (
               <tr key={participant.participant} className="border-b border-[#eee9fb] last:border-b-0">
                 <td className="px-5 py-4 font-black">{index + 1}</td>
                 <td className="px-5 py-4 font-black">{participant.participant}</td>
@@ -559,7 +610,7 @@ function LiveEventStatus() {
   );
 }
 
-function Promotions() {
+function Promotions({ data, onRefresh }: { data: AdminData; onRefresh: () => Promise<void> }) {
   const [promoTab, setPromoTab] = useState(0);
   const [modal, setModal] = useState<"post-update" | "add-promotion" | null>(null);
 
@@ -591,18 +642,33 @@ function Promotions() {
         </>
       )}
 
-      {promoTab === 1 && <UpdatesPush />}
+      {promoTab === 1 && <UpdatesPush data={data} />}
       {promoTab === 2 && <AddonPromos />}
-      {modal === "post-update" && <PostUpdateModal onClose={() => setModal(null)} />}
-      {modal === "add-promotion" && <AddPromotionModal onClose={() => setModal(null)} />}
+      {modal === "post-update" && <PostUpdateModal onClose={() => setModal(null)} onRefresh={onRefresh} />}
+      {modal === "add-promotion" && <AddPromotionModal onClose={() => setModal(null)} onRefresh={onRefresh} />}
     </div>
   );
 }
 
-function UpdatesPush() {
+function UpdatesPush({ data }: { data: AdminData }) {
   return (
     <div className="space-y-5">
       <h2 className="text-lg font-black sm:text-xl">Live Updates & Push Notifications</h2>
+      {data.notifications.map((item) => (
+        <Panel key={item.id} className="p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+            <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[#f0ebff] text-xs font-black text-[#5b45d1]">Push</div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-base font-black">{item.title}</h3>
+              <p className="mt-1 text-sm font-semibold text-[#8f8ba6]">{item.message}</p>
+              <p className="mt-3 text-xs font-bold text-[#8f8ba6]">{item.createdAt} - visible in member app</p>
+            </div>
+            <div className="flex shrink-0 flex-row gap-2 lg:flex-col lg:items-end">
+              <Badge tone="green">Live</Badge>
+            </div>
+          </div>
+        </Panel>
+      ))}
       <Panel className="p-5">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
           <div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-[#f0ebff] text-2xl">🎉</div>
@@ -643,11 +709,20 @@ function AddonPromos() {
   );
 }
 
-function PostUpdateModal({ onClose }: { onClose: () => void }) {
+function PostUpdateModal({ onClose, onRefresh }: { onClose: () => void; onRefresh: () => Promise<void> }) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await postJson("/api/admin/notifications", { message: form.get("message"), type: form.get("type") });
+    await onRefresh();
+    onClose();
+  }
+
   return (
-    <AdminFormModal title="Post Update" icon="📡" onClose={onClose} primaryLabel="Post Update">
-      <Field label="Title *" placeholder="e.g. Registration closing soon!" />
-      <ModalTextarea label="Message *" placeholder="Write your update..." />
+    <AdminFormModal title="Post Update" icon="📡" onClose={onClose} primaryLabel="Post Update" onSubmit={submit}>
+      <Field name="title" label="Title *" placeholder="e.g. Registration closing soon!" />
+      <ModalTextarea name="message" label="Message *" placeholder="Write your update..." />
+      <SelectField name="type" label="Type" value="announcement" />
       <label className="flex items-center gap-3 rounded-2xl bg-[#eee7ff] px-4 py-3 text-sm font-black text-[#5b45d1]">
         <input className="h-5 w-5 accent-[#604bd1]" type="checkbox" defaultChecked />
         Send as Push Notification to all 128 members
@@ -656,12 +731,21 @@ function PostUpdateModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-function AddPromotionModal({ onClose }: { onClose: () => void }) {
+function AddPromotionModal({ onClose, onRefresh }: { onClose: () => void; onRefresh: () => Promise<void> }) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    await postJson("/api/admin/brands", { name: form.get("name"), note: form.get("note"), description: form.get("description"), pointsCost: form.get("pointsCost") });
+    await onRefresh();
+    onClose();
+  }
+
   return (
-    <AdminFormModal title="Add Promotion" icon="🎯" onClose={onClose} primaryLabel="Publish">
-      <Field label="Brand Name *" placeholder="e.g. Domino's Pizza" />
-      <Field label="Promotion Title *" placeholder="e.g. Weekend Deal" />
-      <ModalTextarea label="Description *" placeholder="Describe the offer..." />
+    <AdminFormModal title="Add Promotion" icon="🎯" onClose={onClose} primaryLabel="Publish" onSubmit={submit}>
+      <Field name="name" label="Brand Name *" placeholder="e.g. Domino's Pizza" />
+      <Field name="note" label="Promotion Title *" placeholder="e.g. Weekend Deal" />
+      <Field name="pointsCost" label="Points Cost" placeholder="250" type="number" />
+      <ModalTextarea name="description" label="Description *" placeholder="Describe the offer..." />
     </AdminFormModal>
   );
 }
@@ -672,16 +756,18 @@ function AdminFormModal({
   children,
   onClose,
   primaryLabel,
+  onSubmit,
 }: {
   title: string;
   icon: string;
   children: ReactNode;
   onClose: () => void;
   primaryLabel: string;
+  onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   return (
     <div className="fixed inset-0 z-[300] grid place-items-center bg-[#161332]/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <form className="w-full max-w-3xl overflow-hidden rounded-[28px] bg-white shadow-2xl" onSubmit={(event) => event.preventDefault()}>
+      <form className="w-full max-w-3xl overflow-hidden rounded-[28px] bg-white shadow-2xl" onSubmit={onSubmit ?? ((event) => event.preventDefault())}>
         <div className="flex items-center justify-between border-b border-[#e7e1fb] px-6 py-5">
           <h2 className="flex items-center gap-3 text-xl font-black"><span>{icon}</span>{title}</h2>
           <button
@@ -698,7 +784,7 @@ function AdminFormModal({
           <button onClick={onClose} className="rounded-full border-2 border-[#e7e1fb] px-6 py-3 text-sm font-black text-[#5b45d1]" type="button">
             Cancel
           </button>
-          <button onClick={onClose} className="rounded-full bg-[#604bd1] px-7 py-3 text-sm font-black text-white shadow-xl shadow-[#604bd1]/25" type="button">
+          <button className="rounded-full bg-[#604bd1] px-7 py-3 text-sm font-black text-white shadow-xl shadow-[#604bd1]/25" type={onSubmit ? "submit" : "button"} onClick={onSubmit ? undefined : onClose}>
             {primaryLabel}
           </button>
         </div>
@@ -707,24 +793,33 @@ function AdminFormModal({
   );
 }
 
-function ModalTextarea({ label, placeholder }: { label: string; placeholder: string }) {
+function ModalTextarea({ label, placeholder, name }: { label: string; placeholder: string; name?: string }) {
   return (
     <label className="grid gap-2">
       <span className="text-xs font-black">{label}</span>
-      <textarea className="min-h-28 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" placeholder={placeholder} />
+      <textarea name={name} className="min-h-28 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" placeholder={placeholder} />
     </label>
   );
 }
 
-function Business() {
+function Business({ data, onRefresh }: { data: AdminData; onRefresh: () => Promise<void> }) {
   const [businessTab, setBusinessTab] = useState(0);
   const [revoked, setRevoked] = useState<Record<string, boolean>>({});
+
+  async function revoke(voucher: AdminRedemption) {
+    await postJson("/api/admin/redemptions/status", { redemptionId: voucher.id, status: "cancelled" });
+    setRevoked((current) => ({ ...current, [voucher.voucher]: true }));
+    await onRefresh();
+  }
 
   return (
     <div className="space-y-5">
       <SegmentedTabs tabs={["Brands", "Voucher Redemptions"]} activeIndex={businessTab} onSelect={setBusinessTab} />
       {businessTab === 0 ? (
         <div className="grid gap-4 xl:grid-cols-2">
+          {data.brands.map((brand) => (
+            <BrandCard key={brand.id} color={brand.color} icon={brand.icon} name={brand.name} email={brand.email} code={brand.code} />
+          ))}
           <BrandCard color="bg-[#6754d6]" icon="☕" name="Cafe Coffee Day" email="partner@ccd.in" code="REF-CCD-2026" />
           <BrandCard color="bg-[#f4484d]" icon="🍕" name="Domino's Pizza" email="partner@dominos.in" code="REF-DOM-2026" />
         </div>
@@ -739,7 +834,7 @@ function Business() {
               </tr>
             </thead>
             <tbody>
-              {voucherRedemptions.map((voucher) => {
+              {data.redemptions.map((voucher) => {
                 const isRevoked = revoked[voucher.voucher];
                 return (
                   <tr key={voucher.voucher} className="border-b border-[#eee9fb] last:border-b-0">
@@ -754,7 +849,7 @@ function Business() {
                     </td>
                     <td className="px-5 py-5">
                       <button
-                        onClick={() => setRevoked((current) => ({ ...current, [voucher.voucher]: true }))}
+                        onClick={() => revoke(voucher)}
                         className="rounded-full bg-red-500 px-5 py-2.5 text-xs font-black text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
                         type="button"
                         disabled={isRevoked}
@@ -773,14 +868,14 @@ function Business() {
   );
 }
 
-function ReferralDashboard() {
+function ReferralDashboard({ data }: { data: AdminData }) {
   return (
     <div className="space-y-5">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard title="Total Referrals" value="87" note="+ 14 this month" icon={<Link size={24} />} />
-        <MetricCard title="Conversions" value="62" note="71% conversion rate" icon={<Check size={24} />} green />
-        <MetricCard title="Points Awarded" value="3,100" note="50 pts per referral" icon={<Target size={24} />} amber />
-        <MetricCard title="Top Referrer" value="Vikram M." note="12 referrals" icon={<Trophy size={24} />} />
+        <MetricCard title="Total Referrals" value={String(data.stats.totalReferrals)} note="Live referrals" icon={<Link size={24} />} />
+        <MetricCard title="Conversions" value={String(data.stats.totalReferrals)} note="Joined members" icon={<Check size={24} />} green />
+        <MetricCard title="Points Awarded" value={String(data.stats.referralPoints)} note="50 pts per referral" icon={<Target size={24} />} amber />
+        <MetricCard title="Top Referrer" value={data.topReferrers[0]?.name || "-"} note={`${data.topReferrers[0]?.referrals || 0} referrals`} icon={<Trophy size={24} />} />
       </div>
 
       <div className="rounded-[22px] border-2 border-[#6754d6] bg-[#f0ebff] p-5">
@@ -803,7 +898,7 @@ function ReferralDashboard() {
               <p className="font-black">This Month</p>
               <span className="rounded-full bg-[#e7ddff] px-4 py-2 text-sm font-black text-[#5b45d1]">May 2026</span>
             </div>
-            {topReferrers.map(([rank, name, meta, points, referrals]) => (
+            {data.topReferrers.map(({ rank, name, meta, points, referrals }) => (
               <div key={rank} className="grid gap-4 border-t border-[#e7e1fb] px-6 py-5 sm:grid-cols-[auto_1fr_auto] sm:items-center">
                 <div className="grid h-11 w-11 place-items-center rounded-full bg-[#f8c400] font-black text-white">{rank}</div>
                 <div>
@@ -833,13 +928,13 @@ function ReferralDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {["Priya Agarwal", "Kabir Sethi", "Meera Jain"].map((name, index) => (
-                  <tr key={name} className="border-t border-[#e7e1fb]">
-                    <td className="px-4 py-3"><span className="rounded-full bg-[#5b45d1] px-3 py-1 text-xs font-black text-white">KK-2V71P</span></td>
-                    <td className="px-4 py-3 font-black">{name}</td>
-                    <td className="px-4 py-3 font-bold">{28 - index} Apr</td>
+                {data.recentReferrals.map((referral) => (
+                  <tr key={`${referral.code}-${referral.newMember}`} className="border-t border-[#e7e1fb]">
+                    <td className="px-4 py-3"><span className="rounded-full bg-[#5b45d1] px-3 py-1 text-xs font-black text-white">{referral.code}</span></td>
+                    <td className="px-4 py-3 font-black">{referral.newMember}</td>
+                    <td className="px-4 py-3 font-bold">{referral.date}</td>
                     <td className="px-4 py-3"><span className="rounded-full bg-green-100 px-3 py-1 text-xs font-black text-green-700">Joined</span></td>
-                    <td className="px-4 py-3 font-black">+50</td>
+                    <td className="px-4 py-3 font-black">+{referral.points}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1226,25 +1321,30 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
   );
 }
 
-function SelectField({ label, value }: { label: string; value: string }) {
+function SelectField({ label, value, name }: { label: string; value: string; name?: string }) {
   return (
     <label className="grid gap-2">
       <span className="text-xs font-black">{label}</span>
-      <button className="flex h-11 items-center justify-between rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-2 text-sm font-bold" type="button">
-        {value} <ChevronDown size={20} />
-      </button>
+      <select name={name} className="h-11 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-2 text-sm font-bold outline-none" defaultValue={value}>
+        <option>{value}</option>
+        <option>announcement</option>
+        <option>alert</option>
+        <option>Experience</option>
+        <option>Engage</option>
+        <option>Explore</option>
+      </select>
     </label>
   );
 }
 
-function PillButton({ icon, label, muted, onClick }: { icon?: ReactNode; label: string; muted?: boolean; onClick?: () => void }) {
+function PillButton({ icon, label, muted, onClick, submit }: { icon?: ReactNode; label: string; muted?: boolean; onClick?: () => void; submit?: boolean }) {
   return (
     <button
       onClick={onClick}
       className={`flex w-fit items-center justify-center gap-2 rounded-full px-6 py-3 font-black transition ${
         muted ? "border border-[#e7e1fb] bg-white text-xs text-[#5b45d1] hover:bg-[#f6f3ff]" : "bg-[#604bd1] text-xs text-white shadow-xl shadow-[#604bd1]/25 hover:bg-[#503bc1]"
       }`}
-      type="button"
+      type={submit ? "submit" : "button"}
     >
       {icon} {label}
     </button>
@@ -1297,4 +1397,11 @@ function ParentMini({ role, name, phone, initials, pink }: { role: string; name:
       </div>
     </div>
   );
+}
+
+async function postJson(url: string, body: unknown) {
+  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || "Request failed.");
+  return data;
 }

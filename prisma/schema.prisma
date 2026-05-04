@@ -1,0 +1,230 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  user
+  admin
+}
+
+enum KidStatus {
+  pending
+  approved
+  rejected
+}
+
+enum PaymentStatus {
+  pending
+  success
+  failed
+  refunded
+}
+
+enum RedemptionStatus {
+  issued
+  redeemed
+  cancelled
+  expired
+}
+
+enum NotificationType {
+  announcement
+  alert
+}
+
+model User {
+  id               Int              @id @default(autoincrement())
+  email            String?          @unique @db.VarChar(190)
+  mobile           String           @unique @db.VarChar(20)
+  password         String?          @db.VarChar(255)
+  parent_name      String           @db.VarChar(190)
+  father_name      String?          @db.VarChar(190)
+  mother_name      String?          @db.VarChar(190)
+  alternate_mobile String?          @db.VarChar(20)
+  profession       String?          @db.VarChar(190)
+  address          String?
+  locality         String?          @db.VarChar(190)
+  city             String?          @db.VarChar(120)
+  state            String?          @db.VarChar(120)
+  pincode          String?          @db.VarChar(20)
+  child_name       String?          @db.VarChar(190)
+  age              Int?
+  block_sector     String?          @db.VarChar(120)
+  konnekt_kode     String?          @unique @db.VarChar(60)
+  role             UserRole         @default(user)
+  created_at       DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime         @default(now()) @updatedAt @db.Timestamptz(6)
+  kids             Kid[]
+  bookings         Booking[]
+  referralGiven    ReferralReward[] @relation("ReferralReferrer")
+  referralReceived ReferralReward[] @relation("ReferralReferred")
+  brandReferrals   BrandReferral[]
+
+  @@map("users")
+}
+
+model Kid {
+  id             Int          @id @default(autoincrement())
+  parent_id      Int
+  child_name     String       @db.VarChar(190)
+  age            Int?
+  school         String?      @db.VarChar(190)
+  dob            DateTime?    @db.Date
+  photo          String?      @db.VarChar(255)
+  school_id_card String?      @db.VarChar(255)
+  block_rank     String       @default("Newbie") @db.VarChar(80)
+  status         KidStatus    @default(pending)
+  konnekt_kode   String?      @unique @db.VarChar(60)
+  konnekt_points Int          @default(100)
+  created_at     DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+  parent         User         @relation(fields: [parent_id], references: [id], onDelete: Cascade)
+  bookings       Booking[]
+  redemptions    Redemption[]
+
+  @@index([parent_id])
+  @@index([status])
+  @@map("kids")
+}
+
+model Event {
+  id          Int       @id @default(autoincrement())
+  title       String    @db.VarChar(190)
+  description String?
+  category    String?   @db.VarChar(80)
+  event_date  DateTime? @db.Timestamptz(6)
+  location    String?   @db.VarChar(190)
+  price       Decimal   @default(0.00) @db.Decimal(10, 2)
+  image       String?   @db.VarChar(255)
+  capacity    Int?
+  is_active   Boolean   @default(true)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  bookings    Booking[]
+
+  @@index([event_date])
+  @@index([is_active])
+  @@map("events")
+}
+
+model Booking {
+  id                  Int           @id @default(autoincrement())
+  user_id             Int
+  kid_id              Int
+  event_id            Int
+  razorpay_payment_id String?       @db.VarChar(190)
+  amount              Decimal       @default(0.00) @db.Decimal(10, 2)
+  qr_token            String        @unique @db.VarChar(120)
+  payment_status      PaymentStatus @default(pending)
+  checked_in_at       DateTime?     @db.Timestamptz(6)
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime      @default(now()) @updatedAt @db.Timestamptz(6)
+  user                User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  kid                 Kid           @relation(fields: [kid_id], references: [id], onDelete: Cascade)
+  event               Event         @relation(fields: [event_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([kid_id])
+  @@index([event_id])
+  @@index([payment_status])
+  @@map("bookings")
+}
+
+model Brand {
+  id          Int          @id @default(autoincrement())
+  name        String       @db.VarChar(190)
+  description String?
+  note        String?      @db.VarChar(255)
+  points_cost Int          @default(0)
+  is_active   Boolean      @default(true)
+  created_at  DateTime     @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
+  redemptions Redemption[]
+  brandUsers  BrandUser[]
+
+  @@index([is_active])
+  @@index([points_cost])
+  @@map("brands")
+}
+
+model Redemption {
+  id           Int              @id @default(autoincrement())
+  kid_id       Int
+  brand_id     Int?
+  brand_name   String           @db.VarChar(190)
+  points_spent Int              @default(0)
+  coupon_code  String           @unique @db.VarChar(120)
+  status       RedemptionStatus @default(issued)
+  redeemed_at  DateTime?        @db.Timestamptz(6)
+  created_at   DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime         @default(now()) @updatedAt @db.Timestamptz(6)
+  kid          Kid              @relation(fields: [kid_id], references: [id], onDelete: Cascade)
+  brand        Brand?           @relation(fields: [brand_id], references: [id], onDelete: SetNull)
+
+  @@index([kid_id])
+  @@index([brand_id])
+  @@index([status])
+  @@map("redemptions")
+}
+
+model Notification {
+  id         Int              @id @default(autoincrement())
+  message    String
+  type       NotificationType @default(announcement)
+  created_at DateTime         @default(now()) @db.Timestamptz(6)
+
+  @@index([created_at])
+  @@map("notifications")
+}
+
+model ReferralReward {
+  id                 Int      @id @default(autoincrement())
+  referrer_parent_id Int
+  referred_parent_id Int
+  referral_code      String   @db.VarChar(60)
+  points_awarded     Int      @default(50)
+  created_at         DateTime @default(now()) @db.Timestamptz(6)
+  referrer           User     @relation("ReferralReferrer", fields: [referrer_parent_id], references: [id], onDelete: Cascade)
+  referred           User     @relation("ReferralReferred", fields: [referred_parent_id], references: [id], onDelete: Cascade)
+
+  @@index([referrer_parent_id])
+  @@index([referred_parent_id])
+  @@map("referral_rewards")
+}
+
+model BrandUser {
+  id            Int             @id @default(autoincrement())
+  brand_id      Int
+  brand_name    String?         @db.VarChar(190)
+  email         String          @unique @db.VarChar(190)
+  password      String          @db.VarChar(255)
+  partner_mobile String         @db.VarChar(20)
+  referral_code String?         @unique @db.VarChar(60)
+  is_active     Boolean         @default(true)
+  created_at    DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime        @default(now()) @updatedAt @db.Timestamptz(6)
+  brand         Brand           @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  referrals     BrandReferral[]
+
+  @@index([brand_id])
+  @@index([is_active])
+  @@map("brand_users")
+}
+
+model BrandReferral {
+  id                 Int       @id @default(autoincrement())
+  brand_user_id      Int
+  referred_parent_id Int
+  referral_code      String    @db.VarChar(60)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  brandUser          BrandUser @relation(fields: [brand_user_id], references: [id], onDelete: Cascade)
+  referredParent     User      @relation(fields: [referred_parent_id], references: [id], onDelete: Cascade)
+
+  @@index([brand_user_id])
+  @@index([referred_parent_id])
+  @@map("brand_referrals")
+}

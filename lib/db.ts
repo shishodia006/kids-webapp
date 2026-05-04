@@ -1,26 +1,47 @@
-﻿import "server-only";
+import "server-only";
 
-import mysql, { type Pool, type PoolConnection, type PoolOptions, type ResultSetHeader, type RowDataPacket } from "mysql2/promise";
+import { Prisma, PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
 
 const globalForDb = globalThis as typeof globalThis & {
-  konnectlyDbPool?: Pool;
+  konnectlyPrisma?: PrismaClient;
 };
 
-export type DbRow = RowDataPacket;
-export type DbResult = ResultSetHeader;
-type DbValues = NonNullable<Parameters<Pool["execute"]>[1]>;
+export type DbRow = Record<string, unknown>;
+export type DbResult = { affectedRows: number };
+type DbValues = unknown[];
+type PrismaTx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
+
+export type DbConnection = {
+  execute: (sql: string, values?: DbValues) => Promise<[DbResult]>;
+  queryRows: <T extends DbRow = DbRow>(sql: string, values?: DbValues) => Promise<T[]>;
+  queryOne: <T extends DbRow = DbRow>(sql: string, values?: DbValues) => Promise<T | null>;
+};
 
 export function getDbPool() {
-  if (!globalForDb.konnectlyDbPool) {
-    globalForDb.konnectlyDbPool = mysql.createPool(getDbConfig());
+  return getPrisma();
+}
+
+export function getPrisma() {
+  if (!globalForDb.konnectlyPrisma) {
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error("DATABASE_URL is not configured. Add your Supabase PostgreSQL URL to .env.local.");
+    }
+
+    globalForDb.konnectlyPrisma = new PrismaClient({
+      adapter: new PrismaPg({
+        connectionString,
+        ssl: connectionString.includes("supabase.co") ? { rejectUnauthorized: false } : undefined,
+      }),
+    });
   }
 
-  return globalForDb.konnectlyDbPool;
+  return globalForDb.konnectlyPrisma;
 }
 
 export async function queryRows<T extends DbRow = DbRow>(sql: string, values: DbValues = []) {
-  const [rows] = await getDbPool().execute<T[]>(sql, values);
-  return rows;
+  return runQueryRows<T>(getPrisma(), sql, values);
 }
 
 export async function queryOne<T extends DbRow = DbRow>(sql: string, values: DbValues = []) {
@@ -29,53 +50,56 @@ export async function queryOne<T extends DbRow = DbRow>(sql: string, values: DbV
 }
 
 export async function executeQuery(sql: string, values: DbValues = []) {
-  const [result] = await getDbPool().execute<DbResult>(sql, values);
-  return result;
+  const affectedRows = await getPrisma().$executeRawUnsafe(normalizeSql(sql), ...normalizeValues(values));
+  return { affectedRows };
 }
 
-export async function withTransaction<T>(callback: (connection: PoolConnection) => Promise<T>) {
-  const connection = await getDbPool().getConnection();
-
-  try {
-    await connection.beginTransaction();
-    const result = await callback(connection);
-    await connection.commit();
-    return result;
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
+export async function withTransaction<T>(callback: (connection: DbConnection) => Promise<T>) {
+  return getPrisma().$transaction(async (tx) => callback(makeConnection(tx)));
 }
 
 export async function checkDbConnection() {
-  const row = await queryOne<{ ok: number } & DbRow>("SELECT 1 AS ok");
-  return row?.ok === 1;
+  const row = await queryOne<{ ok: number }>("SELECT 1 AS ok");
+  return Number(row?.ok) === 1;
 }
 
-function getDbConfig(): PoolOptions {
-  const host = process.env.DB_HOST ?? "localhost";
-  const database = process.env.DB_NAME;
-  const user = process.env.DB_USER;
-  const password = process.env.DB_PASSWORD;
-  const port = Number(process.env.DB_PORT ?? "3306");
-
-  if (!database || !user) {
-    throw new Error("Database is not configured. Set DB_NAME, DB_USER, and DB_PASSWORD.");
-  }
-
-  return {
-    host,
-    database,
-    user,
-    password,
-    port,
-    charset: process.env.DB_CHARSET ?? "utf8mb4",
-    waitForConnections: true,
-    connectionLimit: Number(process.env.DB_CONNECTION_LIMIT ?? "10"),
-    queueLimit: 0,
-    namedPlaceholders: false,
-    timezone: "Z",
+function makeConnection(client: PrismaTx): DbConnection {
+  const connection: DbConnection = {
+    async execute(sql, values = []) {
+      const affectedRows = await client.$executeRawUnsafe(normalizeSql(sql), ...normalizeValues(values));
+      return [{ affectedRows }];
+    },
+    queryRows(sql, values = []) {
+      return runQueryRows(client, sql, values);
+    },
+    async queryOne<T extends DbRow = DbRow>(sql: string, values: DbValues = []): Promise<T | null> {
+      const rows = await runQueryRows<T>(client, sql, values);
+      return rows[0] ?? null;
+    },
   };
+
+  return connection;
+}
+
+async function runQueryRows<T extends DbRow>(client: PrismaClient | PrismaTx, sql: string, values: DbValues) {
+  return client.$queryRawUnsafe<T[]>(normalizeSql(sql), ...normalizeValues(values));
+}
+
+function normalizeSql(sql: string) {
+  let index = 0;
+  return sql.replace(/\?/g, () => {
+    index += 1;
+    return `$${index}`;
+  });
+}
+
+function normalizeValues(values: DbValues) {
+  return values.map((value) => {
+    if (value instanceof Date) return value;
+    if (typeof value === "boolean") return value;
+    if (value == null) return value;
+    if (typeof value === "number" || typeof value === "bigint") return value;
+    if (typeof value === "object" && Prisma.Decimal.isDecimal(value)) return value;
+    return value;
+  });
 }
