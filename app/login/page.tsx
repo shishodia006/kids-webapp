@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -67,12 +67,6 @@ export default function LoginPage() {
             placeholder="Password"
             type="password"
           />
-
-          <div className="flex min-h-[66px] items-center gap-3.5 rounded-[16px] border border-[#dcd7ff] bg-[#f4f1ff] px-4 text-[14px] font-semibold leading-[1.4] text-[#5f4bd3]">
-            <span className="shrink-0 font-bold">Secure Login</span>
-            <span>Register ke time WhatsApp OTP verify hota hai; login mobile number aur password se hoga.</span>
-          </div>
-
           <button
             disabled={loading || normalizedPhone.length !== 10 || password.length === 0}
             type="submit"
