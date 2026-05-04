@@ -1,6 +1,6 @@
 "use client";
 
-import type { AppBooking, AppBrand, AppData, AppEvent, AppKid, AppNotification } from "@/lib/app-data";
+import type { AppBooking, AppBrand, AppData, AppEvent, AppKid, AppNotification, AppRewardHistory } from "@/lib/app-data";
 import {
   ArrowLeft,
   BatteryFull,
@@ -25,10 +25,10 @@ import {
   X,
 } from "lucide-react";
 import Image from "next/image";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 type NavLabel = "Home" | "Activities" | "Updates" | "Account";
-type Voucher = { brandName: string; coupon: string };
+type Voucher = { brandName: string; coupon: string; qrCode?: string; expiresAt?: string };
 
 declare global {
   interface Window {
@@ -49,6 +49,8 @@ export default function UserApp() {
   const [activeNav, setActiveNav] = useState<NavLabel>("Home");
   const [referOpen, setReferOpen] = useState(false);
   const [voucher, setVoucher] = useState<Voucher | null>(null);
+  const [addKidOpen, setAddKidOpen] = useState(false);
+  const [widgetOpen, setWidgetOpen] = useState(false);
   const [selectedPass, setSelectedPass] = useState<AppBooking | null>(null);
   const [currentTime, setCurrentTime] = useState("");
 
@@ -77,6 +79,7 @@ export default function UserApp() {
       const nextData = await response.json();
       if (!response.ok) throw new Error(nextData.message || "Unable to load app data.");
       setData(nextData);
+      setWidgetOpen(Boolean(nextData.showWidgetSetup));
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load app data.");
@@ -109,6 +112,11 @@ export default function UserApp() {
     } catch (error) {
       alert(error instanceof Error ? error.message : "Unable to issue voucher.");
     }
+  }
+
+  async function dismissWidget() {
+    await postJson("/api/app/widget/dismiss", {});
+    setWidgetOpen(false);
   }
 
   async function bookEvent(event: AppEvent, kidIds: number[]) {
@@ -159,19 +167,20 @@ export default function UserApp() {
             data={data}
             notification={latestNotification}
             onDismissNotification={dismissNotification}
+            onAddKid={() => setAddKidOpen(true)}
             onSwitchKid={switchKid}
           />
         ) : (
-          <ScreenHeader currentTime={currentTime} title={activeNav === "Account" ? "My Account" : activeNav} subtitle={getSubtitle(activeNav)} showPoints={activeNav === "Activities"} points={data?.activeKid?.konnektPoints ?? 0} />
+        <ScreenHeader currentTime={currentTime} title={activeNav === "Account" ? "My Account" : activeNav} subtitle={getSubtitle(activeNav)} showPoints={activeNav === "Activities"} points={data?.user.konnectPoints ?? 0} />
         )}
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-22 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {status && <div className="m-4 rounded-[18px] bg-white p-4 text-sm font-black text-[#5f4bd2] shadow-sm ring-1 ring-[#e9e4fb]">{status}</div>}
           {data && selectedPass && <EventPassScreen booking={selectedPass} onBack={() => setSelectedPass(null)} />}
-          {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onRedeem={redeem} />}
+          {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onRedeem={redeem} onOpenActivities={() => setActiveNav("Activities")} />}
           {data && !selectedPass && activeNav === "Activities" && <ActivitiesScreen data={data} onBook={bookEvent} onOpenPass={setSelectedPass} />}
           {data && !selectedPass && activeNav === "Updates" && <UpdatesScreen notifications={data.notifications} />}
-          {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} />}
+          {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} onAddKid={() => setAddKidOpen(true)} />}
         </div>
 
         <a
@@ -187,6 +196,8 @@ export default function UserApp() {
         <BottomNav activeNav={activeNav} onSelect={(nav) => { setSelectedPass(null); setActiveNav(nav); }} />
         {data && referOpen && <ReferBottomSheet data={data} onClose={() => setReferOpen(false)} />}
         {voucher && <VoucherSheet voucher={voucher} onClose={() => setVoucher(null)} />}
+        {data && addKidOpen && <AddKidSheet onClose={() => setAddKidOpen(false)} onSaved={async () => { setAddKidOpen(false); await loadData(); }} />}
+        {widgetOpen && <WidgetPrompt onClose={dismissWidget} />}
       </section>
     </main>
   );
@@ -204,12 +215,14 @@ function HomeHeader({
   data,
   notification,
   onDismissNotification,
+  onAddKid,
   onSwitchKid,
 }: {
   currentTime: string;
   data: AppData | null;
   notification: AppNotification | null;
   onDismissNotification: (id: number) => void;
+  onAddKid: () => void;
   onSwitchKid: (id: number) => void;
 }) {
   const activeKid = data?.activeKid;
@@ -222,7 +235,7 @@ function HomeHeader({
         <LogoBox />
         <div className="flex items-center gap-2">
           <button className="flex h-8 items-center gap-1.5 rounded-full bg-[#f6c400] px-3 text-[11px] font-black text-[#1c1740]" type="button">
-            <Star size={15} /> {activeKid?.konnektPoints ?? 0}
+            <Star size={15} /> {data?.user.konnectPoints ?? 0}
           </button>
           <IconCircle icon={<Download size={19} />} />
           <IconCircle icon={<Bell size={19} />} />
@@ -255,7 +268,7 @@ function HomeHeader({
             {initials(kid.childName)}
           </button>
         ))}
-        <button className="grid h-11 w-11 shrink-0 place-items-center rounded-full border-2 border-dashed border-white/35 bg-white/10 text-white" type="button" aria-label="Add member">
+        <button onClick={onAddKid} disabled={(data?.kids.length ?? 0) >= 3} className="grid h-11 w-11 shrink-0 place-items-center rounded-full border-2 border-dashed border-white/35 bg-white/10 text-white disabled:opacity-40" type="button" aria-label="Add member">
           <Plus size={20} />
         </button>
       </div>
@@ -310,20 +323,23 @@ function EventPassHeader({ currentTime, onBack }: { currentTime: string; onBack:
   );
 }
 
-function HomeContent({ data, onOpenRefer, onRedeem }: { data: AppData; onOpenRefer: () => void; onRedeem: (brand: AppBrand) => void }) {
+function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities }: { data: AppData; onOpenRefer: () => void; onRedeem: (brand: AppBrand) => void; onOpenActivities: () => void }) {
   const activeKid = data.activeKid;
   const nextEvent = data.events[0];
-  const nextTierRemaining = Math.max(0, 500 - (activeKid?.konnektPoints ?? 0));
+  const offer = data.brands[0];
+  const nextTierRemaining = Math.max(0, 500 - data.user.konnectPoints);
 
   return (
     <div className="space-y-3 px-4 py-4">
+      <button onClick={nextEvent ? onOpenActivities : offer ? () => onRedeem(offer) : undefined} className="block w-full text-left" type="button">
       <section className="relative overflow-hidden rounded-[20px] bg-[#6754d6] px-4 py-5 text-white shadow-sm">
         <div className="relative">
           <span className="rounded-full bg-[#f6c400] px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.24em] text-[#1c1740]">Upcoming Event</span>
           <h2 className="mt-3 text-lg font-black">{nextEvent?.title || "New activities coming soon"}</h2>
-          <p className="mt-2 text-xs font-black text-white/80">{nextEvent ? `${formatDate(nextEvent.eventDate)} · ${nextEvent.location}` : "Watch this space for community events"}</p>
+          <p className="mt-2 text-xs font-black text-white/80">{nextEvent ? `${formatDate(nextEvent.eventDate)} | ${nextEvent.location}` : offer ? `${offer.name} voucher is available` : "Watch this space for community events"}</p>
         </div>
       </section>
+      </button>
 
       <section>
         <div className="mb-2 flex items-center justify-between">
@@ -332,17 +348,17 @@ function HomeContent({ data, onOpenRefer, onRedeem }: { data: AppData; onOpenRef
         </div>
         <div className="relative overflow-hidden rounded-[20px] bg-[#4d39b6] p-4 text-white">
           <div className="flex items-center gap-3">
-            <div className="grid h-16 w-16 place-items-center rounded-full bg-[#f6c400] text-2xl font-black text-[#2a2451]">{activeKid?.konnektPoints ?? 0}</div>
+            <div className="grid h-16 w-16 place-items-center rounded-full bg-[#f6c400] text-2xl font-black text-[#2a2451]">{data.user.konnectPoints}</div>
             <div className="min-w-0 flex-1">
               <h3 className="text-base font-black">{activeKid?.childName || "Member"}&apos;s Balance</h3>
               <p className="mt-1.5 text-xs font-bold text-white/70">{nextTierRemaining} pts to next tier</p>
               <div className="mt-2 h-1.5 rounded-full bg-white/20">
-                <div className="h-full rounded-full bg-[#f6c400]" style={{ width: `${Math.min(100, ((activeKid?.konnektPoints ?? 0) / 500) * 100)}%` }} />
+                <div className="h-full rounded-full bg-[#f6c400]" style={{ width: `${Math.min(100, (data.user.konnectPoints / 500) * 100)}%` }} />
               </div>
             </div>
             <div className="rounded-2xl border border-white/20 bg-white/10 px-3 py-2 text-center">
               <p className="text-[10px] font-black uppercase text-white/50">Cash Value</p>
-              <p className="mt-1 text-base font-black text-[#f6c400]">₹{Math.floor((activeKid?.konnektPoints ?? 0) / 10)}</p>
+              <p className="mt-1 text-base font-black text-[#f6c400]">₹{Math.floor(data.user.konnectPoints / 10)}</p>
             </div>
           </div>
         </div>
@@ -356,7 +372,7 @@ function HomeContent({ data, onOpenRefer, onRedeem }: { data: AppData; onOpenRef
         <div className="grid grid-cols-2 gap-3">
           {data.brands.length === 0 && <EmptyState text="No rewards are active yet." />}
           {data.brands.map((brand) => {
-            const locked = (activeKid?.konnektPoints ?? 0) < brand.pointsCost;
+            const locked = data.user.konnectPoints < brand.pointsCost;
             return (
               <div key={brand.id} className="rounded-[18px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb]">
                 <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#fff5d9] text-[#c99000]">
@@ -428,17 +444,21 @@ function EventList({ events, kids, onBook }: { events: AppEvent[]; kids: AppKid[
               <h3 className="text-sm font-black text-[#292444]">{event.title}</h3>
               <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-[#8d89a6]"><CalendarDays size={15} /> {formatDate(event.eventDate)}</p>
               <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-[#8d89a6]"><MapPin size={15} /> {event.location}</p>
+              <p className="mt-2 flex items-center gap-1.5 text-xs font-bold text-[#8d89a6]"><Star size={15} /> Earn {event.pointsEarnable} pts | Age {event.minAge || 0}-{event.maxAge || "All"}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {kids.map((kid) => {
                   const active = kidIds.includes(kid.id);
+                  const verified = kid.status === "approved";
                   return (
                     <button
                       key={kid.id}
+                      disabled={!verified}
                       onClick={() => setSelected((current) => ({ ...current, [event.id]: active ? kidIds.filter((id) => id !== kid.id) : [...kidIds, kid.id] }))}
-                      className={`rounded-full px-3 py-1.5 text-xs font-black ${active ? "bg-[#5f4bd2] text-white" : "bg-[#eee7ff] text-[#5f4bd2]"}`}
+                      className={`rounded-full px-3 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 ${active ? "bg-[#5f4bd2] text-white" : "bg-[#eee7ff] text-[#5f4bd2]"}`}
                       type="button"
+                      title={verified ? kid.childName : "Verification pending"}
                     >
-                      {kid.childName}
+                      {kid.childName}{verified ? "" : " | Pending"}
                     </button>
                   );
                 })}
@@ -521,7 +541,7 @@ function UpdatesScreen({ notifications }: { notifications: AppNotification[] }) 
   );
 }
 
-function AccountScreen({ data, onSwitchKid }: { data: AppData; onSwitchKid: (id: number) => void }) {
+function AccountScreen({ data, onSwitchKid, onAddKid }: { data: AppData; onSwitchKid: (id: number) => void; onAddKid: () => void }) {
   return (
     <div className="space-y-4 px-4 py-4">
       <div className="rounded-[20px] bg-white p-5 text-center shadow-sm ring-1 ring-[#e9e4fb]">
@@ -539,7 +559,10 @@ function AccountScreen({ data, onSwitchKid }: { data: AppData; onSwitchKid: (id:
       </div>
 
       <section>
-        <h2 className="mb-3 text-base font-black text-[#292444]">Kids Profiles</h2>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h2 className="text-base font-black text-[#292444]">Kids Profiles</h2>
+          <button onClick={onAddKid} disabled={data.kids.length >= 3} className="rounded-full bg-[#5f4bd2] px-3 py-1.5 text-xs font-black text-white disabled:opacity-45" type="button">Add Child</button>
+        </div>
         <div className="space-y-3">
           {data.kids.length === 0 && <EmptyState text="No kid profiles found for this account." />}
           {data.kids.map((kid) => (
@@ -552,11 +575,137 @@ function AccountScreen({ data, onSwitchKid }: { data: AppData; onSwitchKid: (id:
                 </span>
                 <span className="mt-1 block text-xs font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
               </span>
-              <span className="rounded-full bg-[#eee7ff] px-3 py-1 text-xs font-black text-[#5f4bd2]">Age {kid.age || "-"}</span>
+              <span className={`rounded-full px-3 py-1 text-xs font-black ${kid.status === "approved" ? "bg-green-100 text-green-700" : "bg-[#fff8df] text-[#c99000]"}`}>{kid.status === "approved" ? "Verified" : "Verification Pending"}</span>
             </button>
           ))}
         </div>
       </section>
+      <RewardsHistory history={data.rewardHistory} />
+      <button
+        onClick={async () => {
+          if (!window.confirm("Are you sure you want to sign out?")) return;
+          await fetch("/api/auth/logout", { method: "POST" });
+          window.location.href = "/login";
+        }}
+        className="w-full rounded-full bg-[#1b1b1b] px-5 py-3 text-sm font-black text-[#ffc52e]"
+        type="button"
+      >
+        Sign Out
+      </button>
+    </div>
+  );
+}
+
+function RewardsHistory({ history }: { history: AppRewardHistory[] }) {
+  const grouped = history.reduce<Record<string, AppRewardHistory[]>>((acc, item) => {
+    acc[item.month] = [...(acc[item.month] ?? []), item];
+    return acc;
+  }, {});
+
+  return (
+    <section>
+      <h2 className="mb-3 text-base font-black text-[#292444]">Rewards History</h2>
+      <div className="space-y-3">
+        {history.length === 0 && <EmptyState text="No vouchers or redemptions yet." />}
+        {Object.entries(grouped).map(([month, entries]) => (
+          <div key={month} className="rounded-[20px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb]">
+            <h3 className="text-sm font-black text-[#292444]">{month}</h3>
+            <div className="mt-3 space-y-2">
+              {entries.map((entry) => (
+                <div key={entry.id} className="rounded-2xl bg-[#f7f5ff] p-3">
+                  <p className="text-sm font-black text-[#292444]">{entry.brandName}</p>
+                  <p className="mt-1 text-xs font-bold text-[#8d89a6]">{entry.pointsSpent} pts | {entry.voucherCode} | {entry.status}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [childName, setChildName] = useState("");
+  const [dob, setDob] = useState("");
+  const [school, setSchool] = useState("");
+  const [schoolIdCard, setSchoolIdCard] = useState("");
+  const [schoolIdCardData, setSchoolIdCardData] = useState("");
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setStatus("");
+    try {
+      await postJson("/api/app/kids", { childName, dob, school, schoolIdCard, schoolIdCardData });
+      await onSaved();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to add child profile.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-40 flex items-end bg-[#161332]/55 backdrop-blur-sm">
+      <button className="absolute inset-0 cursor-default" type="button" aria-label="Close add child" onClick={onClose} />
+      <form onSubmit={submit} className="relative w-full rounded-t-[32px] bg-white px-5 pb-7 pt-3 shadow-2xl">
+        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-zinc-300" />
+        <button onClick={onClose} className="absolute right-5 top-5 text-[#8d89a6]" type="button" aria-label="Close"><X size={20} /></button>
+        <h2 className="text-xl font-black text-[#292444]">Add Child Profile</h2>
+        <p className="mt-2 text-sm font-bold text-[#8d89a6]">Profiles are reviewed before event registration is enabled.</p>
+        <div className="mt-5 grid gap-3">
+          <SheetInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="As per school records" />
+          <SheetInput label="Date of Birth" value={dob} onChange={setDob} placeholder="" type="date" />
+          <SheetInput label="School Name" value={school} onChange={setSchool} placeholder="School name" />
+          <label className="grid gap-1 text-[11px] font-black text-[#292444]">
+            School ID Card Photo
+            <input required type="file" accept="image/png,image/jpeg" onChange={(event) => {
+              const file = event.target.files?.[0];
+              setSchoolIdCard(file?.name || "");
+              if (!file) {
+                setSchoolIdCardData("");
+                return;
+              }
+              const reader = new FileReader();
+              reader.onload = () => setSchoolIdCardData(typeof reader.result === "string" ? reader.result : "");
+              reader.readAsDataURL(file);
+            }} className="rounded-2xl border-2 border-[#e3e0f4] bg-white px-3 py-3 text-xs font-bold" />
+          </label>
+        </div>
+        {status && <p className="mt-3 text-xs font-black text-[#6655cf]">{status}</p>}
+        <button disabled={loading || !childName || !dob || !school || !schoolIdCard} className="mt-5 w-full rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
+          {loading ? "Submitting..." : "Submit for Verification"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function SheetInput({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; type?: string }) {
+  return (
+    <label className="grid gap-1 text-[11px] font-black text-[#292444]">
+      {label}
+      <input required value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} className="h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]" />
+    </label>
+  );
+}
+
+function WidgetPrompt({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="absolute inset-0 z-50 grid place-items-center bg-[#161332]/70 px-5 backdrop-blur-sm">
+      <div className="w-full rounded-[28px] bg-white p-6 text-center shadow-2xl">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#25d366] text-white"><Download size={28} /></div>
+        <h2 className="mt-5 text-2xl font-black leading-tight text-[#292444]">Never miss an event — add Konnectly to your home screen!</h2>
+        <div className="mt-5 grid gap-3 text-left">
+          <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>iOS:</b> Tap Share in Safari, choose Add to Home Screen, then tap Add.</div>
+          <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open browser menu, choose Install app or Add to Home screen, then confirm.</div>
+        </div>
+        <button onClick={() => { window.konnectlyRequestNotifications?.(); onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white" type="button">Add to Home Screen</button>
+        <button onClick={onClose} className="mt-3 w-full rounded-full border-2 border-[#e3e0f4] px-5 py-3 text-sm font-black text-[#6655cf]" type="button">Maybe Later</button>
+      </div>
     </div>
   );
 }

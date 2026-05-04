@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
 }
 
 datasource db {
@@ -55,6 +56,7 @@ model User {
   age              Int?
   block_sector     String?          @db.VarChar(120)
   konnekt_kode     String?          @unique @db.VarChar(60)
+  konnect_points   Int              @default(0)
   role             UserRole         @default(user)
   created_at       DateTime         @default(now()) @db.Timestamptz(6)
   updated_at       DateTime         @default(now()) @updatedAt @db.Timestamptz(6)
@@ -63,6 +65,8 @@ model User {
   referralGiven    ReferralReward[] @relation("ReferralReferrer")
   referralReceived ReferralReward[] @relation("ReferralReferred")
   brandReferrals   BrandReferral[]
+  pointLedger      PointLedger[]
+  pushSubscriptions PushSubscription[]
 
   @@map("users")
 }
@@ -76,6 +80,8 @@ model Kid {
   dob            DateTime?    @db.Date
   photo          String?      @db.VarChar(255)
   school_id_card String?      @db.VarChar(255)
+  school_id_card_data String?
+  gender         String?      @db.VarChar(20)
   block_rank     String       @default("Newbie") @db.VarChar(80)
   status         KidStatus    @default(pending)
   konnekt_kode   String?      @unique @db.VarChar(60)
@@ -101,6 +107,11 @@ model Event {
   price       Decimal   @default(0.00) @db.Decimal(10, 2)
   image       String?   @db.VarChar(255)
   capacity    Int?
+  min_age     Int?
+  max_age     Int?
+  gender      String?   @db.VarChar(20)
+  restricted_area String? @db.VarChar(190)
+  points_earnable Int   @default(100)
   is_active   Boolean   @default(true)
   created_at  DateTime  @default(now()) @db.Timestamptz(6)
   updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
@@ -119,6 +130,10 @@ model Booking {
   razorpay_payment_id String?       @db.VarChar(190)
   amount              Decimal       @default(0.00) @db.Decimal(10, 2)
   qr_token            String        @unique @db.VarChar(120)
+  backup_code         String?       @db.VarChar(40)
+  points_total        Int           @default(100)
+  points_awarded_on_payment Int     @default(50)
+  points_awarded_on_attendance Int  @default(0)
   payment_status      PaymentStatus @default(pending)
   checked_in_at       DateTime?     @db.Timestamptz(6)
   created_at          DateTime      @default(now()) @db.Timestamptz(6)
@@ -158,6 +173,8 @@ model Redemption {
   brand_name   String           @db.VarChar(190)
   points_spent Int              @default(0)
   coupon_code  String           @unique @db.VarChar(120)
+  qr_code      String?          @db.VarChar(255)
+  expires_at   DateTime?        @db.Timestamptz(6)
   status       RedemptionStatus @default(issued)
   redeemed_at  DateTime?        @db.Timestamptz(6)
   created_at   DateTime         @default(now()) @db.Timestamptz(6)
@@ -169,6 +186,37 @@ model Redemption {
   @@index([brand_id])
   @@index([status])
   @@map("redemptions")
+}
+
+model PointLedger {
+  id          Int      @id @default(autoincrement())
+  user_id     Int
+  kid_id      Int?
+  source      String   @db.VarChar(80)
+  points      Int
+  description String?
+  ref_type    String?  @db.VarChar(80)
+  ref_id      Int?
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([kid_id])
+  @@index([created_at])
+  @@map("point_ledger")
+}
+
+model PushSubscription {
+  id         Int      @id @default(autoincrement())
+  user_id    Int
+  endpoint   String   @unique
+  payload    String
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@map("push_subscriptions")
 }
 
 model Notification {

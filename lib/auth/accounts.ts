@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
-import { executeQuery, queryOne, queryRows, withTransaction, type DbRow } from "@/lib/db";
+import { executeQuery, queryOne, queryRows, type DbRow } from "@/lib/db";
 
 export type RegisterDetails = {
   fatherName: string;
@@ -19,6 +19,14 @@ export type RegisterDetails = {
   childName: string;
   childAge: number;
   school: string;
+  referralCode: string;
+};
+
+export type ParentSignupDetails = {
+  fullName: string;
+  email: string;
+  phone: string;
+  cityArea: string;
   referralCode: string;
 };
 
@@ -62,6 +70,47 @@ export async function assertCanRegister(phone: string, referralCode: unknown) {
   if (!referrer) return { ok: false as const, message: "Referral code not found. Please check it or leave it blank." };
 
   return { ok: true as const };
+}
+
+export async function createParentAccount(details: ParentSignupDetails) {
+  const existing = await findUserByPhone(details.phone);
+  if (existing) return Number(existing.id);
+
+  const parentName = details.fullName || "Konnectly Parent";
+  const kode = await generateParentReferralCode(parentName);
+
+  const inserted = await queryOne<{ id: number }>(
+    `
+    INSERT INTO users
+      (email, mobile, password, parent_name, locality, city, block_sector, konnekt_kode, role)
+    VALUES
+      (?, ?, NULL, ?, ?, ?, ?, ?, 'user')
+    RETURNING id
+    `,
+    [
+      details.email,
+      details.phone,
+      parentName,
+      details.cityArea,
+      details.cityArea,
+      details.referralCode || null,
+      kode,
+    ],
+  );
+
+  const parentId = Number(inserted?.id);
+
+  if (!parentId) {
+    throw new Error("Account creation failed. Parent ID not generated.");
+  }
+
+  return parentId;
+}
+
+export async function setParentPassword(phone: string, password: string) {
+  const passwordHash = await bcrypt.hash(password, 10);
+  const result = await executeQuery("UPDATE users SET password = ? WHERE mobile = ?", [passwordHash, phone]);
+  if (!result.affectedRows) throw new Error("Account not found.");
 }
 
 export async function createRegisteredFamily(details: RegisterDetails) {

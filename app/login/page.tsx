@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -67,7 +67,6 @@ export default function LoginPage() {
             placeholder="Password"
             type="password"
           />
-
           <button
             disabled={loading || normalizedPhone.length !== 10 || password.length === 0}
             type="submit"
@@ -75,6 +74,10 @@ export default function LoginPage() {
           >
             {loading ? "Logging in..." : "Login"}
           </button>
+
+          <Link href="/forgot-password" className="text-center text-[12px] font-black uppercase tracking-[0.08em] text-[#5f4bd3]">
+            Forgot Password?
+          </Link>
 
           <p className="mt-1 text-center text-[12px] font-black uppercase tracking-[0.08em] text-zinc-600">
             New Here?{" "}

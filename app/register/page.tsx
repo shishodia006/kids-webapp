@@ -1,72 +1,60 @@
 "use client";
 
-import { ArrowLeft, BatteryFull, ShieldCheck, Wifi } from "lucide-react";
+import { ArrowLeft, Bell, Check, Home, KeyRound, MessageCircle, ShieldCheck } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type FormEvent, type MutableRefObject } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
-type RegisterStep = "details" | "otp";
-type OtpResponse = {
-  requestId: string;
-  expiresAt: number;
-  message: string;
-};
+type Step = "details" | "otp" | "terms" | "password" | "widget";
 type RegisterDetails = {
-  fatherName: string;
-  motherName: string;
+  fullName: string;
+  phone: string;
   email: string;
-  password: string;
-  confirmPassword: string;
-  alternateMobile: string;
-  address: string;
-  locality: string;
-  city: string;
-  state: string;
-  pincode: string;
-  childName: string;
-  childAge: string;
-  school: string;
+  cityArea: string;
   referralCode: string;
 };
 
 export default function RegisterPage() {
+  return (
+    <Suspense fallback={<RegisterFallback />}>
+      <RegisterFlow />
+    </Suspense>
+  );
+}
+
+function RegisterFlow() {
   const router = useRouter();
-  const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
-  const sendingRef = useRef(false);
-  const verifyingRef = useRef(false);
-  const [step, setStep] = useState<RegisterStep>("details");
-  const [primaryPhone, setPrimaryPhone] = useState("");
+  const searchParams = useSearchParams();
+  const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const termsRef = useRef<HTMLDivElement | null>(null);
+  const [step, setStep] = useState<Step>("details");
   const [details, setDetails] = useState<RegisterDetails>({
-    fatherName: "",
-    motherName: "",
+    fullName: "",
+    phone: "",
     email: "",
-    password: "",
-    confirmPassword: "",
-    alternateMobile: "",
-    address: "",
-    locality: "",
-    city: "",
-    state: "",
-    pincode: "",
-    childName: "",
-    childAge: "",
-    school: "",
-    referralCode: "",
+    cityArea: "",
+    referralCode: searchParams.get("ref")?.toUpperCase() ?? "",
   });
   const [requestId, setRequestId] = useState("");
   const [expiresAt, setExpiresAt] = useState(0);
+  const [sentAt, setSentAt] = useState(0);
   const [otp, setOtp] = useState(Array(6).fill(""));
+  const [attempts, setAttempts] = useState(0);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [termsRead, setTermsRead] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(0);
 
-  const normalizedPhone = primaryPhone.replace(/\D/g, "").slice(-10);
-  const remainingSeconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const phone = details.phone.replace(/\D/g, "").slice(-10);
   const otpCode = otp.join("");
-
+  const remainingSeconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const resendSeconds = Math.max(0, Math.ceil((sentAt + 30_000 - now) / 1000));
   const timerLabel = useMemo(() => {
-    const minutes = Math.floor(remainingSeconds / 60).toString();
-    const seconds = (remainingSeconds % 60).toString().padStart(2, "0");
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = String(remainingSeconds % 60).padStart(2, "0");
     return `${minutes}:${seconds}`;
   }, [remainingSeconds]);
 
@@ -75,10 +63,12 @@ export default function RegisterPage() {
     return () => window.clearInterval(timer);
   }, []);
 
+  function update(key: keyof RegisterDetails, value: string) {
+    setDetails((current) => ({ ...current, [key]: key === "referralCode" ? value.toUpperCase() : value }));
+  }
+
   async function sendOtp(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault();
-    if (sendingRef.current) return;
-    sendingRef.current = true;
     setLoading(true);
     setStatus("");
 
@@ -86,9 +76,9 @@ export default function RegisterPage() {
       const response = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: normalizedPhone, purpose: "register", registration: details }),
+        body: JSON.stringify({ phone, purpose: "register", registration: { ...details, phone } }),
       });
-      const data = (await response.json()) as Partial<OtpResponse>;
+      const data = (await response.json()) as { message?: string; requestId?: string; expiresAt?: number; ttlSeconds?: number };
 
       if (!response.ok || !data.requestId || !data.expiresAt) {
         throw new Error(data.message ?? "Unable to send OTP.");
@@ -96,22 +86,32 @@ export default function RegisterPage() {
 
       setRequestId(data.requestId);
       setExpiresAt(data.expiresAt);
+      setSentAt(Date.now());
+      setNow(Date.now());
+      setAttempts(0);
       setOtp(Array(6).fill(""));
       setStep("otp");
       setStatus(data.message ?? "OTP sent on WhatsApp.");
-      window.setTimeout(() => inputRefs.current[0]?.focus(), 50);
+      window.setTimeout(() => otpRefs.current[0]?.focus(), 50);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to send OTP.");
+      const message = error instanceof Error ? error.message : "Unable to send OTP.";
+      if (message.includes("already registered") || message.includes("already linked")) {
+        setStatus("This number is already linked to an account. Sign in instead?");
+      } else {
+        setStatus(message);
+      }
     } finally {
-      sendingRef.current = false;
       setLoading(false);
     }
   }
 
   async function verifyOtp(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (verifyingRef.current) return;
-    verifyingRef.current = true;
+    if (attempts >= 3) {
+      setStatus("Too many attempts. Please restart sign up and request a new OTP.");
+      return;
+    }
+
     setLoading(true);
     setStatus("");
 
@@ -119,448 +119,293 @@ export default function RegisterPage() {
       const response = await fetch("/api/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: normalizedPhone, purpose: "register", requestId, code: otpCode, registration: details }),
+        body: JSON.stringify({ phone, purpose: "register", requestId, code: otpCode, createAccount: false }),
       });
       const data = (await response.json()) as { message?: string };
 
       if (!response.ok) {
+        setAttempts((current) => current + 1);
         throw new Error(data.message ?? "Unable to verify OTP.");
       }
 
-      router.push("/app");
+      setStep("terms");
+      setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to verify OTP.");
     } finally {
-      verifyingRef.current = false;
+      setLoading(false);
+    }
+  }
+
+  async function createAccount() {
+    setLoading(true);
+    setStatus("");
+
+    try {
+      const response = await fetch("/api/auth/complete-registration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phone, requestId, code: otpCode, acceptedTerms, registration: { ...details, phone } }),
+      });
+      const data = (await response.json()) as { message?: string };
+
+      if (!response.ok) {
+        throw new Error(data.message ?? "Unable to create account.");
+      }
+
+      setStatus(data.message ?? `Welcome to Konnectly, ${firstName(details.fullName)}! Your account has been created.`);
+      setStep("password");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to create account.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function setAccountPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setStatus("");
+
+    try {
+      const response = await fetch("/api/auth/set-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, confirmPassword }),
+      });
+      const data = (await response.json()) as { message?: string };
+
+      if (!response.ok) {
+        throw new Error(data.message ?? "Unable to set password.");
+      }
+
+      setStep("widget");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to set password.");
+    } finally {
       setLoading(false);
     }
   }
 
   function updateOtp(index: number, value: string) {
     const digit = value.replace(/\D/g, "").slice(-1);
-    const nextOtp = [...otp];
-    nextOtp[index] = digit;
-    setOtp(nextOtp);
-
-    if (digit && index < 5) {
-      inputRefs.current[index + 1]?.focus();
-    }
-  }
-
-  function pasteOtp(event: ClipboardEvent<HTMLInputElement>) {
-    const digits = event.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-
-    if (digits.length <= 1) return;
-
-    event.preventDefault();
-    const nextOtp = Array(6).fill("");
-
-    digits.split("").forEach((digit, index) => {
-      nextOtp[index] = digit;
+    setOtp((current) => {
+      const next = [...current];
+      next[index] = digit;
+      return next;
     });
 
-    setOtp(nextOtp);
-    inputRefs.current[Math.min(digits.length, 6) - 1]?.focus();
+    if (digit && index < 5) otpRefs.current[index + 1]?.focus();
+  }
+
+  function handleTermsScroll() {
+    const element = termsRef.current;
+    if (!element) return;
+    const atBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 12;
+    if (atBottom) setTermsRead(true);
   }
 
   return (
-    <main className="grid h-screen overflow-hidden bg-[linear-gradient(120deg,#4435a5_0%,#7667df_58%,#d7a719_100%)] text-[#2f2b55]">
-      <section className="mx-auto flex h-full min-h-0 w-full max-w-[410px] flex-col overflow-hidden bg-[#f7f5ff] shadow-2xl sm:rounded-[38px]">
-        <StatusBar />
-        {step === "details" ? (
-          <DetailsForm
-            loading={loading}
-            details={details}
-            primaryPhone={primaryPhone}
-            setDetails={setDetails}
-            setPrimaryPhone={setPrimaryPhone}
-            status={status}
-            onSubmit={sendOtp}
-          />
-        ) : (
-          <OtpForm
-            inputRefs={inputRefs}
-            loading={loading}
-            normalizedPhone={normalizedPhone}
-            otp={otp}
-            otpCode={otpCode}
-            remainingSeconds={remainingSeconds}
-            status={status}
-            timerLabel={timerLabel}
-            onBack={() => {
-              setStep("details");
-              setStatus("");
-            }}
-            onResend={() => sendOtp()}
-            onSubmit={verifyOtp}
-            onPasteOtp={pasteOtp}
-            onUpdateOtp={updateOtp}
-          />
+    <main className="grid h-dvh overflow-hidden bg-[linear-gradient(120deg,#4435a5_0%,#7667df_58%,#d7a719_100%)] text-[#2f2b55]">
+      <section className="mx-auto flex h-full min-h-0 w-full max-w-[430px] flex-col overflow-hidden bg-[#f7f5ff] shadow-2xl sm:rounded-[34px]">
+        <div className="flex h-8 shrink-0 items-center justify-between bg-[#382c98] px-5 text-sm font-black text-white">
+          <span>Konnectly</span>
+          <span className="flex items-center gap-1.5">IN <MessageCircle size={15} /></span>
+        </div>
+
+        {step === "details" && (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <Header eyebrow="Parent Sign Up" title="Create your Konnectly account" body="Start with parent details. Child profiles are added after account setup." />
+            <form onSubmit={sendOtp} className="grid gap-3.5 px-5 py-5">
+              <Field label="Full Name" required value={details.fullName} onChange={(value) => update("fullName", value)} placeholder="Parent full name" />
+              <PhoneField value={details.phone} onChange={(value) => update("phone", value)} />
+              <Field label="Email Address" required type="email" value={details.email} onChange={(value) => update("email", value)} placeholder="parent@example.com" />
+              <Field label="City / Area" required value={details.cityArea} onChange={(value) => update("cityArea", value)} placeholder="Gurugram, Sector 50" />
+              <Field label="Referral Code" value={details.referralCode} onChange={(value) => update("referralCode", value)} placeholder="Optional" mono />
+              <PrimaryButton disabled={loading || phone.length !== 10 || !details.fullName.trim() || !details.email.trim() || !details.cityArea.trim()}>
+                {loading ? "Sending OTP..." : "Send OTP"}
+              </PrimaryButton>
+              <Status message={status} />
+              {status.includes("Sign in instead") && <Link className="text-center text-xs font-black text-[#5f4bd3] underline" href="/login">Go to Sign In</Link>}
+              <p className="text-center text-[11px] font-bold text-[#9290aa]">Already have an account? <Link href="/login" className="font-black text-[#5f4bd3]">Sign In</Link></p>
+            </form>
+          </div>
+        )}
+
+        {step === "otp" && (
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[#fbf4e5] px-4 py-5">
+            <BackButton onClick={() => setStep("details")} />
+            <form onSubmit={verifyOtp} className="rounded-[24px] bg-white px-5 py-7 text-center shadow-xl">
+              <IconBadge icon={<ShieldCheck size={30} />} />
+              <p className="mt-6 text-[11px] font-black uppercase tracking-[0.22em] text-[#8b2cf4]">OTP Verification</p>
+              <h1 className="mt-2 text-3xl font-black">Enter OTP</h1>
+              <p className="mx-auto mt-3 max-w-[300px] text-sm font-semibold leading-6 text-zinc-600">
+                We sent a 6-digit code on WhatsApp to +91 {phone}. It is valid for 5 minutes.
+              </p>
+              <div className="mt-7 grid grid-cols-6 gap-2">
+                {otp.map((digit, index) => (
+                  <input
+                    key={index}
+                    ref={(element) => { otpRefs.current[index] = element; }}
+                    value={digit}
+                    onChange={(event) => updateOtp(index, event.target.value)}
+                    className="aspect-square min-w-0 rounded-[14px] border-[3px] border-zinc-200 bg-white text-center text-xl font-black outline-none focus:border-[#f6c23c]"
+                    inputMode="numeric"
+                    maxLength={1}
+                    type="text"
+                    aria-label={`OTP digit ${index + 1}`}
+                  />
+                ))}
+              </div>
+              <PrimaryButton className="mt-7" disabled={loading || otpCode.length !== 6 || remainingSeconds <= 0 || attempts >= 3}>
+                {loading ? "Verifying..." : "Verify OTP"}
+              </PrimaryButton>
+              <p className="mt-4 text-xs font-bold text-zinc-500">Expires in {timerLabel} | Attempts left {Math.max(0, 3 - attempts)}</p>
+              <button type="button" disabled={loading || resendSeconds > 0} onClick={() => sendOtp()} className="mt-3 text-sm font-black text-[#8b2cf4] underline underline-offset-2 disabled:text-zinc-400">
+                {resendSeconds > 0 ? `Resend in ${resendSeconds}s` : "Resend OTP"}
+              </button>
+              <Status message={status} />
+            </form>
+          </div>
+        )}
+
+        {step === "terms" && (
+          <div className="flex min-h-0 flex-1 flex-col bg-[#fbf4e5] px-4 py-5">
+            <BackButton onClick={() => setStep("otp")} />
+            <section className="flex min-h-0 flex-1 flex-col rounded-[24px] bg-white p-5 shadow-xl">
+              <h1 className="text-2xl font-black">Disclaimer & Terms</h1>
+              <div ref={termsRef} onScroll={handleTermsScroll} className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-2xl border border-zinc-200 bg-zinc-50 p-4 text-sm font-semibold leading-6 text-zinc-700">
+                <TermsContent />
+              </div>
+              <label className="mt-4 flex items-start gap-3 text-xs font-black leading-5 text-[#2f2b55]">
+                <input type="checkbox" checked={acceptedTerms} onChange={(event) => setAcceptedTerms(event.target.checked)} disabled={!termsRead} className="mt-1 h-4 w-4" />
+                <span>I have read, understood, and agree to Konnectly&apos;s Terms of Use, Privacy Policy, and consent to the use of my child&apos;s data as described above.</span>
+              </label>
+              {!termsRead && <p className="mt-2 text-xs font-bold text-[#8b2cf4]">Scroll through the full terms to enable acknowledgement.</p>}
+              <PrimaryButton className="mt-4" disabled={loading || !acceptedTerms || !termsRead} onClick={createAccount} type="button">
+                {loading ? "Creating Account..." : "I Agree & Create Account"}
+              </PrimaryButton>
+              <Status message={status} />
+            </section>
+          </div>
+        )}
+
+        {step === "password" && (
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-8">
+            <IconBadge icon={<KeyRound size={30} />} />
+            <h1 className="mt-6 text-3xl font-black">Set Password</h1>
+            <p className="mt-3 text-sm font-semibold leading-6 text-zinc-600">{status || `Welcome to Konnectly, ${firstName(details.fullName)}! Your account has been created.`}</p>
+            <form onSubmit={setAccountPassword} className="mt-6 grid gap-3.5">
+              <Field label="Password" required type="password" value={password} onChange={setPassword} placeholder="Minimum 8 characters" />
+              <Field label="Confirm Password" required type="password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter password" />
+              <PrimaryButton disabled={loading || password.length < 8 || password !== confirmPassword}>{loading ? "Saving..." : "Continue"}</PrimaryButton>
+              <Status message={status.includes("Welcome") ? "" : status} />
+            </form>
+          </div>
+        )}
+
+        {step === "widget" && (
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-8 text-center">
+            <IconBadge icon={<Home size={30} />} />
+            <h1 className="mt-6 text-3xl font-black leading-tight">Never miss an event — add Konnectly to your home screen!</h1>
+            <div className="mt-6 grid gap-3 text-left">
+              <WidgetStep title="iOS" body="Tap Share in Safari, choose Add to Home Screen, then tap Add." />
+              <WidgetStep title="Android" body="Open the browser menu, choose Install app or Add to Home screen, then confirm." />
+            </div>
+            <button type="button" onClick={() => window.konnectlyRequestNotifications?.()} className="mt-7 flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white">
+              <Bell size={18} /> Add to Home Screen
+            </button>
+            <button type="button" onClick={() => router.push("/app")} className="mt-3 w-full rounded-full border-2 border-[#dcd7ff] bg-white px-5 py-3 text-sm font-black text-[#5f4bd3]">
+              Maybe Later
+            </button>
+          </div>
         )}
       </section>
     </main>
   );
 }
 
-function StatusBar() {
-  const [time, setTime] = useState("");
-
-  useEffect(() => {
-    function updateTime() {
-      setTime(
-        new Intl.DateTimeFormat("en-IN", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: false,
-        }).format(new Date()),
-      );
-    }
-
-    updateTime();
-    const timer = window.setInterval(updateTime, 30000);
-    return () => window.clearInterval(timer);
-  }, []);
-
+function Header({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
   return (
-    <div className="flex h-8 shrink-0 items-center justify-between bg-[#382c98] px-5 text-sm font-black text-white">
-      <span className="tabular-nums">{time || "--:--"}</span>
-      <span className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 rounded-full bg-white" />
-        <Wifi size={15} strokeWidth={3} />
-        <BatteryFull size={16} strokeWidth={2.6} />
-      </span>
+    <section className="relative overflow-hidden bg-[#5444bf] px-6 pb-7 pt-7 text-white">
+      <p className="inline-flex rounded-full bg-white/15 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em]">{eyebrow}</p>
+      <h1 className="mt-4 max-w-[310px] text-2xl font-black leading-tight">{title}</h1>
+      <p className="mt-3 text-sm font-bold leading-6 text-white/75">{body}</p>
+    </section>
+  );
+}
+
+function RegisterFallback() {
+  return (
+    <main className="grid h-dvh place-items-center bg-[#fbf4e5] px-4 text-[#2f2b55]">
+      <div className="rounded-[22px] bg-white px-6 py-5 text-sm font-black shadow-sm">Loading sign up...</div>
+    </main>
+  );
+}
+
+function TermsContent() {
+  return (
+    <div className="space-y-4">
+      <h2 className="font-black text-[#2f2b55]">What Konnectly Gives You Access To</h2>
+      <p>Discovery of curated kid-friendly activities, workshops, and events in your city. A verified profile system for children. Konnect Points redeemable at partner brands and Refer & Earn benefits for growing the community.</p>
+      <h2 className="font-black text-[#2f2b55]">Consent: Use of Children&apos;s Data & Photos</h2>
+      <p>By registering a child profile, you consent to Konnectly storing the child&apos;s name, date of birth, school name, and school ID card image for profile verification. Konnectly may use anonymised or credited event photos for promotional content. You may withdraw photo consent by contacting support.</p>
+      <h2 className="font-black text-[#2f2b55]">Konnectly&apos;s Rights & Responsibilities</h2>
+      <p>Konnectly may verify, approve, or reject child profile submissions, may modify, suspend, or terminate accounts that violate platform guidelines, and may update these terms. Parents will be notified of material changes via push notification and email.</p>
     </div>
   );
 }
 
-function DetailsForm({
-  loading,
-  details,
-  primaryPhone,
-  setDetails,
-  setPrimaryPhone,
-  status,
-  onSubmit,
-}: {
-  loading: boolean;
-  details: RegisterDetails;
-  primaryPhone: string;
-  setDetails: (value: RegisterDetails) => void;
-  setPrimaryPhone: (value: string) => void;
-  status: string;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  function updateDetail(key: keyof RegisterDetails, value: string) {
-    setDetails({ ...details, [key]: value });
-  }
-
+function Field({ label, value, onChange, placeholder, required, type = "text", mono }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; type?: string; mono?: boolean }) {
   return (
-    <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
-      <section className="relative overflow-hidden bg-[#5444bf] px-6 pb-7 pt-7 text-white">
-        <DecorativeShapes />
-        <p className="relative inline-flex rounded-full bg-white/15 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em]">
-          Parent Account
-        </p>
-        <h1 className="relative mt-4 max-w-[290px] text-2xl font-black leading-tight">
-          Create your Konnectly family profile
-        </h1>
-        <p className="relative mt-3 text-sm font-bold leading-6 text-white/70">
-          Your WhatsApp number will be verified before account creation.
-        </p>
-      </section>
-
-      <form onSubmit={onSubmit} className="-mt-1 rounded-t-[24px] bg-[#f7f5ff] px-5 pb-7 pt-5 sm:px-6">
-        <div className="grid gap-3.5">
-          <Field label="Father's Full Name" required placeholder="e.g. Rahul Sharma" value={details.fatherName} onChange={(value) => updateDetail("fatherName", value)} />
-          <Field label="Mother's Full Name" required placeholder="e.g. Priya Sharma" value={details.motherName} onChange={(value) => updateDetail("motherName", value)} />
-          <Field label="Email" placeholder="parent@example.com" value={details.email} onChange={(value) => updateDetail("email", value)} type="email" />
-          <PhoneField label="Primary WhatsApp Number" value={primaryPhone} onChange={setPrimaryPhone} />
-          <Field label="Password" required placeholder="Minimum 8 characters" value={details.password} onChange={(value) => updateDetail("password", value)} type="password" minLength={8} />
-          <Field
-            label="Confirm Password"
-            required
-            placeholder="Re-enter password"
-            value={details.confirmPassword}
-            onChange={(value) => updateDetail("confirmPassword", value)}
-            type="password"
-            minLength={8}
-          />
-          <PhoneField label="Alternate Number" value={details.alternateMobile} onChange={(value) => updateDetail("alternateMobile", value)} required={false} />
-          <Field label="Home Address" required placeholder="Flat / House No., Building, Street..." tall value={details.address} onChange={(value) => updateDetail("address", value)} />
-
-          <div className="grid gap-3 min-[370px]:grid-cols-[1.35fr_1fr]">
-            <label className="grid min-w-0 gap-1 text-[11px] font-black text-[#2f2b55]">
-              <span>Locality <Required /></span>
-              <select
-                required
-                value={details.locality}
-                onChange={(event) => updateDetail("locality", event.target.value)}
-                className="h-12 w-full min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-black text-[#2f2b55] outline-none focus:border-[#6655cf]"
-              >
-                <option value="" disabled>
-                  Select...
-                </option>
-                <option>Gurugram</option>
-                <option>Ashok Vihar</option>
-                <option>DLF Phase 2</option>
-                <option>Sector 50</option>
-              </select>
-            </label>
-            <Field label="Pincode" required placeholder="122001" value={details.pincode} onChange={(value) => updateDetail("pincode", value)} />
-          </div>
-          <div className="grid gap-3 min-[370px]:grid-cols-[1.35fr_0.75fr]">
-            <Field label="Child's Full Name" required placeholder="e.g. Aarav Sharma" value={details.childName} onChange={(value) => updateDetail("childName", value)} />
-            <Field
-              label="Age"
-              required
-              placeholder="8"
-              value={details.childAge}
-              onChange={(value) => {
-                const age = Number(value.replace(/\D/g, "").slice(0, 2));
-                updateDetail("childAge", age > 18 ? "18" : age > 0 ? String(age) : "");
-              }}
-              type="number"
-              min={1}
-              max={18}
-            />
-          </div>
-          <Field label="School Name" placeholder="e.g. DPS R.K. Puram" value={details.school} onChange={(value) => updateDetail("school", value)} />
-
-          <div className="rounded-[18px] border-2 border-[#ead387] bg-[#fff7d8] p-3">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] font-black text-[#bd8900]">
-              <span>Referred by KonnektKode</span>
-              <span className="rounded-full bg-[#f0c500] px-2.5 py-1 text-[9px] uppercase tracking-[0.12em] text-[#2f2b55]">
-                Optional
-              </span>
-            </div>
-            <input
-              value={details.referralCode}
-              onChange={(event) => updateDetail("referralCode", event.target.value.toUpperCase())}
-              className="mt-2.5 h-12 w-full min-w-0 rounded-2xl border-2 border-[#eadca7] bg-white px-3.5 font-mono text-xs font-black uppercase tracking-[0.12em] outline-none placeholder:text-[#77777c] focus:border-[#c99a00]"
-              placeholder="e.g. KK-7X92M"
-              type="text"
-            />
-          </div>
-        </div>
-
-        <button
-          disabled={
-            loading ||
-            primaryPhone.replace(/\D/g, "").slice(-10).length !== 10 ||
-            !details.fatherName.trim() ||
-            !details.motherName.trim() ||
-            details.password.length < 8 ||
-            details.password !== details.confirmPassword ||
-            !details.childName.trim() ||
-            Number(details.childAge) < 1 ||
-            Number(details.childAge) > 18 ||
-            !details.address.trim() ||
-            !details.locality.trim() ||
-            !details.pincode.trim()
-          }
-          type="submit"
-          className="mt-6 w-full rounded-full bg-[#6655cf] px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-[#6655cf]/30 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55"
-        >
-          {loading ? "Sending OTP..." : "Continue & Get OTP"}
-        </button>
-        {status && <p className="mt-4 text-center text-[11px] font-black text-[#6655cf]">{status}</p>}
-        <p className="mt-4 text-center text-[11px] font-bold text-[#9290aa]">
-          Already have an account?{" "}
-          <Link href="/login" className="font-black text-[#5f4bd3]">
-            Sign In
-          </Link>
-        </p>
-      </form>
-    </div>
-  );
-}
-
-function OtpForm({
-  inputRefs,
-  loading,
-  normalizedPhone,
-  otp,
-  otpCode,
-  remainingSeconds,
-  status,
-  timerLabel,
-  onBack,
-  onResend,
-  onSubmit,
-  onPasteOtp,
-  onUpdateOtp,
-}: {
-  inputRefs: MutableRefObject<Array<HTMLInputElement | null>>;
-  loading: boolean;
-  normalizedPhone: string;
-  otp: string[];
-  otpCode: string;
-  remainingSeconds: number;
-  status: string;
-  timerLabel: string;
-  onBack: () => void;
-  onResend: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onPasteOtp: (event: ClipboardEvent<HTMLInputElement>) => void;
-  onUpdateOtp: (index: number, value: string) => void;
-}) {
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto bg-[#fbf4e5] px-4 py-5">
-      <button
-        onClick={onBack}
-        className="mb-4 grid h-10 w-10 place-items-center rounded-full bg-white text-[#6655cf] shadow-sm"
-        type="button"
-        aria-label="Back to details"
-      >
-        <ArrowLeft size={20} />
-      </button>
-
-      <form onSubmit={onSubmit} className="rounded-[30px] bg-white px-5 py-8 text-center shadow-xl">
-        <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#25d366] text-white">
-          <ShieldCheck size={30} />
-        </div>
-        <p className="mt-7 text-[11px] font-black uppercase tracking-[0.26em] text-[#8b2cf4]">
-          Secure Verification
-        </p>
-        <h1 className="mt-3 text-4xl font-black leading-none" style={{ fontFamily: "Georgia, serif" }}>
-          Enter OTP
-        </h1>
-        <p className="mx-auto mt-5 max-w-[300px] text-sm font-semibold leading-6 text-zinc-600">
-          We sent a 6-digit code to WhatsApp +91 {normalizedPhone}. It is valid for 5 minutes.
-        </p>
-
-        <div className="mt-8 grid grid-cols-6 gap-2.5">
-          {otp.map((digit, index) => (
-            <input
-              key={index}
-              ref={(element) => {
-                inputRefs.current[index] = element;
-              }}
-              value={digit}
-              onChange={(event) => onUpdateOtp(index, event.target.value)}
-              onPaste={onPasteOtp}
-              onKeyDown={(event) => {
-                if (event.key === "Backspace" && !otp[index] && index > 0) {
-                  inputRefs.current[index - 1]?.focus();
-                }
-              }}
-              className="aspect-square min-w-0 rounded-[16px] border-[3px] border-zinc-200 bg-white text-center text-xl font-black outline-none transition focus:border-[#f6c23c] focus:bg-[#fffaf0]"
-              inputMode="numeric"
-              maxLength={1}
-              type="text"
-              aria-label={`OTP digit ${index + 1}`}
-            />
-          ))}
-        </div>
-
-        <button
-          disabled={loading || otpCode.length !== 6 || remainingSeconds <= 0}
-          type="submit"
-          className="mt-8 h-14 w-full rounded-full bg-[#1b1b1b] px-5 text-base font-black text-[#ffc52e] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55"
-        >
-          {loading ? "Verifying..." : "Verify & Continue"}
-        </button>
-
-        <p className="mt-6 text-sm font-bold text-zinc-500">OTP expires in {timerLabel}</p>
-        <button
-          type="button"
-          onClick={onResend}
-          disabled={loading || remainingSeconds > 240}
-          className="mt-3 text-sm font-black text-[#8b2cf4] underline underline-offset-2 disabled:cursor-not-allowed disabled:text-zinc-400"
-        >
-          Resend OTP on WhatsApp
-        </button>
-        {status && <p className="mt-5 text-xs font-black text-[#6655cf]">{status}</p>}
-      </form>
-    </div>
-  );
-}
-
-function DecorativeShapes() {
-  return (
-    <>
-      <span className="absolute -right-16 -top-12 h-40 w-40 rounded-full bg-white/10" />
-      <span className="absolute -bottom-14 -left-12 h-36 w-36 rounded-full bg-white/10" />
-      <span className="absolute left-7 top-20 h-16 w-16 rounded-full bg-white/10" />
-    </>
-  );
-}
-
-function Field({
-  label,
-  placeholder,
-  required,
-  tall,
-  value,
-  onChange,
-  type = "text",
-  min,
-  max,
-  minLength,
-}: {
-  label: string;
-  placeholder: string;
-  required?: boolean;
-  tall?: boolean;
-  value: string;
-  onChange: (value: string) => void;
-  type?: string;
-  min?: number;
-  max?: number;
-  minLength?: number;
-}) {
-  return (
-    <label className="grid min-w-0 gap-1 text-[11px] font-black text-[#2f2b55]">
-      <span>
-        {label} {required && <Required />}
-      </span>
-      <input
-        required={required}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder}
-        type={type}
-        min={min}
-        max={max}
-        minLength={minLength}
-        className={`${tall ? "h-16" : "h-12"} w-full min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none placeholder:text-xs placeholder:text-[#77777c] focus:border-[#6655cf]`}
-      />
+    <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
+      <span>{label} {required && <span className="text-[#e04572]">*</span>}</span>
+      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} className={`h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf] ${mono ? "font-mono uppercase tracking-[0.12em]" : ""}`} />
     </label>
   );
 }
 
-function PhoneField({
-  label,
-  value,
-  onChange,
-  required = true,
-}: {
-  label: string;
-  value?: string;
-  onChange?: (value: string) => void;
-  required?: boolean;
-}) {
+function PhoneField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   return (
-    <label className="grid min-w-0 gap-1 text-[11px] font-black text-[#2f2b55]">
-      <span>
-        {label} {required && <Required />}
-      </span>
-      <div className="grid min-w-0 grid-cols-[64px_minmax(0,1fr)] gap-2 sm:grid-cols-[70px_minmax(0,1fr)]">
+    <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
+      <span>Primary Mobile Number <span className="text-[#e04572]">*</span></span>
+      <div className="grid grid-cols-[68px_minmax(0,1fr)] gap-2">
         <div className="grid h-12 place-items-center rounded-2xl border-2 border-[#e3e0f4] bg-white text-xs font-black">IN +91</div>
-        <input
-          required={required}
-          value={value}
-          onChange={(event) => onChange?.(event.target.value)}
-          pattern="[0-9 ]{10,13}"
-          placeholder="98765 43210"
-          type="tel"
-          className="h-12 min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none placeholder:text-xs placeholder:text-[#77777c] focus:border-[#6655cf]"
-        />
+        <input required value={value} onChange={(event) => onChange(event.target.value)} pattern="[0-9 ]{10,13}" placeholder="98765 43210" type="tel" className="h-12 min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]" />
       </div>
     </label>
   );
 }
 
-function Required() {
-  return <span className="text-[#e04572]">*</span>;
+function PrimaryButton({ children, disabled, onClick, type = "submit", className = "" }: { children: ReactNode; disabled?: boolean; onClick?: () => void; type?: "submit" | "button"; className?: string }) {
+  return (
+    <button type={type} onClick={onClick} disabled={disabled} className={`${className} w-full rounded-full bg-[#6655cf] px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-[#6655cf]/25 transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-55`}>
+      {children}
+    </button>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return <button onClick={onClick} className="mb-4 grid h-10 w-10 place-items-center rounded-full bg-white text-[#6655cf] shadow-sm" type="button" aria-label="Back"><ArrowLeft size={20} /></button>;
+}
+
+function IconBadge({ icon }: { icon: ReactNode }) {
+  return <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#25d366] text-white">{icon}</div>;
+}
+
+function WidgetStep({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-[18px] border-2 border-[#e3e0f4] bg-white p-4">
+      <p className="flex items-center gap-2 text-sm font-black text-[#2f2b55]"><Check size={17} className="text-[#25d366]" /> {title}</p>
+      <p className="mt-2 text-xs font-bold leading-5 text-zinc-600">{body}</p>
+    </div>
+  );
+}
+
+function Status({ message }: { message: string }) {
+  return message ? <p className="mt-3 text-center text-xs font-black text-[#6655cf]">{message}</p> : null;
+}
+
+function firstName(name: string) {
+  return name.trim().split(/\s+/)[0] || "Parent";
 }

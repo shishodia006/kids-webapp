@@ -12,18 +12,13 @@ export async function POST(request: Request) {
     }
 
     if (purpose === "register") {
-      const childAge = Number(body.registration?.childAge);
-      if (!Number.isFinite(childAge) || childAge < 1 || childAge > 18) {
-        return Response.json({ message: "Child age must be between 1 and 18 years." }, { status: 400 });
-      }
+      const registration = body.registration && typeof body.registration === "object" ? body.registration as Record<string, unknown> : {};
+      const fullName = typeof registration.fullName === "string" ? registration.fullName.trim() : "";
+      const email = typeof registration.email === "string" ? registration.email.trim() : "";
+      const cityArea = typeof registration.cityArea === "string" ? registration.cityArea.trim() : "";
 
-      const password = typeof body.registration?.password === "string" ? body.registration.password : "";
-      const confirmPassword = typeof body.registration?.confirmPassword === "string" ? body.registration.confirmPassword : "";
-      if (password.length < 8) {
-        return Response.json({ message: "Password must be at least 8 characters." }, { status: 400 });
-      }
-      if (password !== confirmPassword) {
-        return Response.json({ message: "Password and confirm password do not match." }, { status: 400 });
+      if (!fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !cityArea) {
+        return Response.json({ message: "Please enter your full name, valid email, and city/area." }, { status: 400 });
       }
     } else {
       return Response.json({ message: "Login now uses mobile number and password. Please login directly." }, { status: 410 });

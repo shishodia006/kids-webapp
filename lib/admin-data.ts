@@ -239,6 +239,7 @@ export async function getAdminData(): Promise<AdminData> {
 
 export async function createAdminEvent(input: Record<string, unknown>) {
   await requireAdmin();
+  await ensureAdminProductSchema();
   const title = clean(input.title);
   if (!title) throw new Error("Activity name is required.");
 
@@ -247,7 +248,7 @@ export async function createAdminEvent(input: Record<string, unknown>) {
   const eventDate = date ? new Date(`${date}T${time}:00`) : null;
 
   await executeQuery(
-    "INSERT INTO events (title, location, event_date, price, capacity, category, description, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, true)",
+    "INSERT INTO events (title, location, event_date, price, capacity, category, description, min_age, max_age, gender, restricted_area, points_earnable, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)",
     [
       title,
       clean(input.venue),
@@ -256,6 +257,11 @@ export async function createAdminEvent(input: Record<string, unknown>) {
       input.capacity ? Number(input.capacity) : null,
       clean(input.category) || "Experience",
       clean(input.description),
+      input.minAge ? Number(input.minAge) : null,
+      input.maxAge ? Number(input.maxAge) : null,
+      clean(input.gender) || "All",
+      clean(input.restrictedArea),
+      Number(input.pointsEarnable || 100),
     ],
   );
 }
@@ -281,12 +287,113 @@ export async function createAdminBrand(input: Record<string, unknown>) {
 
 export async function updateKidStatus(kidId: number, status: "approved" | "rejected") {
   await requireAdmin();
+  await ensureAdminProductSchema();
   const kode = status === "approved" ? await generateKidCode(kidId) : null;
   if (status === "approved") {
     await executeQuery("UPDATE kids SET status = 'approved', konnekt_kode = COALESCE(konnekt_kode, ?) WHERE id = ?", [kode, kidId]);
+    await awardReferralOnApproval(kidId);
+    const kid = await queryOne<AnyRow>(
+      `SELECT k.child_name, u.mobile
+       FROM kids k
+       JOIN users u ON u.id = k.parent_id
+       WHERE k.id = ?
+       LIMIT 1`,
+      [kidId],
+    );
+    if (kid?.mobile) {
+      const { sendWhatsAppText } = await import("@/lib/auth/otp");
+      await sendWhatsAppText(
+        str(kid.mobile),
+        `Great news! ${str(kid.child_name) || "Your child"}'s profile has been verified. You can now register for events. Explore what's on for them!`,
+      );
+    }
   } else {
     await executeQuery("UPDATE kids SET status = 'rejected' WHERE id = ?", [kidId]);
   }
+}
+
+async function awardReferralOnApproval(kidId: number) {
+  const approvedKid = await queryOne<AnyRow>(
+    `SELECT k.parent_id, u.parent_name, u.block_sector AS referral_code
+     FROM kids k
+     JOIN users u ON u.id = k.parent_id
+     WHERE k.id = ?
+     LIMIT 1`,
+    [kidId],
+  );
+  const referredParentId = num(approvedKid?.parent_id);
+  const referralCode = str(approvedKid?.referral_code).trim().toUpperCase();
+  if (!referredParentId || !referralCode) return;
+
+  const existingReward = await queryOne<AnyRow>(
+    "SELECT id FROM referral_rewards WHERE referred_parent_id = ? LIMIT 1",
+    [referredParentId],
+  );
+  if (existingReward) return;
+
+  const referrer = await findReferrerByCode(referralCode);
+  if (!referrer || referrer.parentId === referredParentId) return;
+
+  const points = 50;
+  await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referrer.parentId]);
+  await executeQuery(
+    "INSERT INTO point_ledger (user_id, source, points, description, ref_type, ref_id) VALUES (?, 'successful_referral', ?, ?, 'referral', ?)",
+    [referrer.parentId, points, `${str(approvedKid?.parent_name) || "A parent"} joined Konnectly using your referral.`, referredParentId],
+  );
+
+  const referredKids = await queryRows<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC", [referredParentId]);
+  const baseShare = referredKids.length ? Math.floor(points / referredKids.length) : 0;
+  const remainder = referredKids.length ? points % referredKids.length : 0;
+  for (const [index, kid] of referredKids.entries()) {
+    const share = baseShare + (index < remainder ? 1 : 0);
+    if (share > 0) await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [share, num(kid.id)]);
+  }
+
+  await executeQuery(
+    "INSERT INTO referral_rewards (referrer_parent_id, referred_parent_id, referral_code, points_awarded) VALUES (?, ?, ?, ?)",
+    [referrer.parentId, referredParentId, referralCode, points],
+  );
+}
+
+async function ensureAdminProductSchema() {
+  await executeQuery("ALTER TABLE users ADD COLUMN IF NOT EXISTS konnect_points INTEGER NOT NULL DEFAULT 0");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS min_age INTEGER");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS max_age INTEGER");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS restricted_area VARCHAR(190)");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS points_earnable INTEGER NOT NULL DEFAULT 100");
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS point_ledger (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      kid_id INTEGER,
+      source VARCHAR(80) NOT NULL,
+      points INTEGER NOT NULL,
+      description TEXT,
+      ref_type VARCHAR(80),
+      ref_id INTEGER,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+}
+
+async function findReferrerByCode(code: string) {
+  const parent = await queryOne<AnyRow>(
+    "SELECT id AS parent_id FROM users WHERE UPPER(konnekt_kode) = ? LIMIT 1",
+    [code],
+  );
+  if (parent) return { parentId: num(parent.parent_id) };
+
+  const kid = await queryOne<AnyRow>(
+    `SELECT parent_id
+     FROM kids
+     WHERE UPPER(konnekt_kode) = ?
+     LIMIT 1`,
+    [code],
+  );
+  if (kid) return { parentId: num(kid.parent_id) };
+
+  return null;
 }
 
 export async function updateRedemptionStatus(redemptionId: number, status: "issued" | "redeemed" | "cancelled" | "expired") {

@@ -62,6 +62,24 @@ export async function POST(request: Request) {
       );
     }
 
+    if (body.createAccount === false) {
+      const result = verifyOtp({
+        requestId: body.requestId,
+        phone,
+        purpose,
+        code,
+      });
+
+      if (!result.ok) {
+        return NextResponse.json(
+          { message: result.message },
+          { status: 400 }
+        );
+      }
+
+      return NextResponse.json({ message: "OTP verified successfully." });
+    }
+
     const registration = normalizeRegistration(body.registration, phone);
 
     if (!registration.ok) {

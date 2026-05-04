@@ -31,8 +31,16 @@ export function PwaRegistration() {
         window.konnectlyRequestNotifications = async () => {
           if (!("Notification" in window)) return "denied";
           if (Notification.permission !== "default") return Notification.permission;
-          return Notification.requestPermission();
+          const permission = await Notification.requestPermission();
+          if (permission === "granted") {
+            void savePushSubscription(registration);
+          }
+          return permission;
         };
+
+        if ("Notification" in window && Notification.permission === "granted") {
+          void savePushSubscription(registration);
+        }
 
         window.konnectlyNotify = async (notification) => {
           if (!("Notification" in window)) return false;
@@ -58,4 +66,17 @@ export function PwaRegistration() {
   }, []);
 
   return null;
+}
+
+async function savePushSubscription(registration: ServiceWorkerRegistration) {
+  if (!("PushManager" in window)) return;
+
+  const subscription = await registration.pushManager.getSubscription();
+  if (!subscription) return;
+
+  await fetch("/api/app/push-subscription", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ subscription: subscription.toJSON() }),
+  }).catch(() => undefined);
 }
