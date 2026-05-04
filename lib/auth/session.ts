@@ -54,6 +54,20 @@ export function createBrandSessionToken({
   return signSessionPayload(payload);
 }
 
+export function createAdminSessionToken(email: string) {
+  const now = Date.now();
+  const payload: AuthSession = {
+    v: 1,
+    sid: randomUUID(),
+    phone: email,
+    role: "admin",
+    issuedAt: now,
+    expiresAt: now + SESSION_TTL_SECONDS * 1000,
+  };
+
+  return signSessionPayload(payload);
+}
+
 export function verifySessionToken(token: unknown) {
   if (typeof token !== "string") return null;
 

@@ -40,22 +40,22 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fbf4e5] px-4 py-4 text-[#1a1a1a]">
-      <section className="min-h-[590px] w-full max-w-[500px] rounded-[28px] border border-zinc-200 bg-white px-[clamp(22px,2.5vw,34px)] py-[clamp(30px,4.4vh,36px)] text-left shadow-[0_24px_90px_rgba(38,26,7,0.14)]">
-        <p className="text-[11px] font-black uppercase tracking-[0.22em] text-[#8b2cf4]">Welcome Back</p>
-        <h1 className="mt-3 text-[44px] font-black leading-[0.95] tracking-normal" style={{ fontFamily: "Georgia, serif" }}>
+    <main className="grid h-dvh overflow-hidden bg-[#fbf4e5] px-4 py-3 text-[#1a1a1a]">
+      <section className="mx-auto my-auto w-full max-w-[430px] rounded-[22px] border border-zinc-200 bg-white px-6 py-7 text-left shadow-[0_20px_70px_rgba(38,26,7,0.14)]">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8b2cf4]">Welcome Back</p>
+        <h1 className="mt-2 text-[36px] font-black leading-none tracking-normal" style={{ fontFamily: "Georgia, serif" }}>
           Login
         </h1>
-        <p className="mt-4 max-w-[430px] text-[16px] font-semibold leading-[1.55] text-zinc-600">
+        <p className="mt-3 max-w-[360px] text-[14px] font-semibold leading-6 text-zinc-600">
           Use your registered mobile number and password to continue.
         </p>
 
-        <form onSubmit={login} className="mt-7 grid gap-3.5">
+        <form onSubmit={login} className="mt-5 grid gap-3">
           <input
             required
             value={phone}
             onChange={(event) => setPhone(event.target.value)}
-            className="h-[54px] w-full min-w-0 rounded-[15px] border-[2px] border-[#cbd6e6] bg-[#e8f0fd] px-4 text-[15px] font-semibold text-black outline-none transition placeholder:text-black/45 focus:border-[#b9c7dc] focus:ring-0"
+            className="h-[48px] w-full min-w-0 rounded-[14px] border-[2px] border-[#cbd6e6] bg-[#e8f0fd] px-4 text-[14px] font-semibold text-black outline-none transition placeholder:text-black/45 focus:border-[#b9c7dc] focus:ring-0"
             placeholder="9811297908"
             type="tel"
           />
@@ -63,33 +63,34 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            className="h-[54px] w-full min-w-0 rounded-[15px] border-[2px] border-[#cbd6e6] bg-[#e8f0fd] px-4 text-[15px] font-semibold text-black outline-none transition placeholder:text-black/45 focus:border-[#b9c7dc] focus:ring-0"
+            className="h-[48px] w-full min-w-0 rounded-[14px] border-[2px] border-[#cbd6e6] bg-[#e8f0fd] px-4 text-[14px] font-semibold text-black outline-none transition placeholder:text-black/45 focus:border-[#b9c7dc] focus:ring-0"
             placeholder="Password"
             type="password"
           />
 
-          <div className="flex min-h-[66px] items-center gap-3.5 rounded-[16px] border border-[#dcd7ff] bg-[#f4f1ff] px-4 text-[14px] font-semibold leading-[1.4] text-[#5f4bd3]">
-            <span className="shrink-0 font-bold">Secure Login</span>
-            <span>Register ke time WhatsApp OTP verify hota hai; login mobile number aur password se hoga.</span>
-          </div>
-
           <button
             disabled={loading || normalizedPhone.length !== 10 || password.length === 0}
             type="submit"
-            className="mt-1 h-[56px] rounded-full bg-[#1a1a1a] px-6 text-[16px] font-black text-[#ffc52e] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
+            className="mt-1 h-[50px] rounded-full bg-[#1a1a1a] px-6 text-[15px] font-black text-[#ffc52e] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
           >
             {loading ? "Logging in..." : "Login"}
           </button>
 
-          <p className="mt-2 text-center text-[13px] font-black uppercase tracking-[0.08em] text-zinc-600">
+          <p className="mt-1 text-center text-[12px] font-black uppercase tracking-[0.08em] text-zinc-600">
             New Here?{" "}
             <Link href="/register" className="text-[#8b2cf4]">
               Create Account
             </Link>
           </p>
+          <p className="text-center text-[12px] font-black uppercase tracking-[0.08em] text-zinc-500">
+            Admin?{" "}
+            <Link href="/admin-login" className="text-[#5f4bd3]">
+              Admin Login
+            </Link>
+          </p>
         </form>
 
-        {status && <p className="mx-auto mt-6 max-w-[520px] text-sm font-black text-[#6d5fde]">{status}</p>}
+        {status && <p className="mx-auto mt-4 max-w-[360px] text-sm font-black text-[#6d5fde]">{status}</p>}
       </section>
     </main>
   );

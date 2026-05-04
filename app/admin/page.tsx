@@ -20,8 +20,6 @@ import {
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import type { AdminBrand, AdminData, AdminEvent, AdminKid, AdminMember, AdminParticipant, AdminRedemption } from "@/lib/admin-data";
 
-const ADMIN_EMAIL = "admin@konnectly.com";
-const ADMIN_PASSWORD = "Admin@123";
 const ADMIN_FONT_STYLE = { fontFamily: "'Nunito', sans-serif" };
 
 type Section = "Memberships" | "Activities" | "Promotions & Updates" | "Business" | "Referral Dashboard";
@@ -161,9 +159,7 @@ const topReferrers = [
 ];
 
 export default function AdminPage() {
-  const [isAuthed, setIsAuthed] = useState(true);
   const [activeSection, setActiveSection] = useState<Section>("Memberships");
-  const [error, setError] = useState("");
   const [comingSoon, setComingSoon] = useState<"Analytics" | "Settings" | null>(null);
   const [referralSettingsOpen, setReferralSettingsOpen] = useState(false);
   const [data, setData] = useState<AdminData | null>(null);
@@ -177,7 +173,7 @@ export default function AdminPage() {
     try {
       const response = await fetch("/api/admin/data", { cache: "no-store" });
       if (response.status === 401) {
-        window.location.href = "/login?next=/admin";
+        window.location.href = "/admin-login?next=/admin";
         return;
       }
       const nextData = await response.json();
@@ -189,17 +185,6 @@ export default function AdminPage() {
     }
   }
 
-  function login(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    if (form.get("email") === ADMIN_EMAIL && form.get("password") === ADMIN_PASSWORD) {
-      setIsAuthed(true);
-      setError("");
-    } else {
-      setError("Wrong admin email or password.");
-    }
-  }
-
   function selectNav(section: (typeof navItems)[number]["section"]) {
     if (section === "Analytics" || section === "Settings") {
       setComingSoon(section);
@@ -207,10 +192,6 @@ export default function AdminPage() {
     }
 
     setActiveSection(section);
-  }
-
-  if (!isAuthed) {
-    return <LoginShell error={error} onSubmit={login} />;
   }
 
   return (
@@ -254,8 +235,7 @@ export default function AdminPage() {
             <button
               onClick={async () => {
                 await fetch("/api/auth/logout", { method: "POST" });
-                setIsAuthed(false);
-                window.location.href = "/login";
+                window.location.href = "/admin-login";
               }}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white transition hover:bg-white/15"
               type="button"
@@ -1214,42 +1194,6 @@ function ComingSoonModal({ title, onClose }: { title: string; onClose: () => voi
         </button>
       </div>
     </div>
-  );
-}
-
-function LoginShell({ error, onSubmit }: { error: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
-  return (
-    <main className="grid min-h-screen place-items-center bg-[#fff9ec] px-5" style={ADMIN_FONT_STYLE}>
-      <form onSubmit={onSubmit} className="w-full max-w-md rounded-[30px] bg-white/80 p-8 shadow-xl backdrop-blur-md">
-        <p className="text-xs font-semibold tracking-widest text-purple-600">WELCOME BACK</p>
-        <h1 className="mt-2 text-5xl font-black text-black">Login</h1>
-        <p className="mt-3 text-sm leading-relaxed text-gray-600">
-          Use your email or mobile number, then confirm with WhatsApp OTP.
-        </p>
-        <input
-          name="email"
-          type="text"
-          placeholder="Enter mobile or email"
-          className="mt-6 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-purple-400"
-        />
-        <input
-          name="password"
-          type="password"
-          placeholder="Enter password / OTP"
-          className="mt-4 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-purple-400"
-        />
-        <div className="mt-4 rounded-xl bg-green-100 px-4 py-3 text-sm text-green-700">
-          <span className="font-semibold">WhatsApp</span> - An OTP will be sent to your registered WhatsApp number.
-        </div>
-        {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
-        <button type="submit" className="mt-6 w-full rounded-full bg-black py-4 text-base font-bold text-yellow-400 transition hover:opacity-90">
-          Send OTP & Login
-        </button>
-        <p className="mt-6 text-center text-sm text-gray-600">
-          NEW HERE? <span className="cursor-pointer font-semibold text-purple-600">CREATE ACCOUNT</span>
-        </p>
-      </form>
-    </main>
   );
 }
 

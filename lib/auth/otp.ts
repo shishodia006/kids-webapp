@@ -100,8 +100,16 @@ export function verifyOtp({
     return { ok: false as const, message: "Incorrect OTP. Please try again." };
   }
 
-  usedOtpTokens.set(hashToken(requestId), payload.expiresAt);
   return { ok: true as const, message: "OTP verified." };
+}
+
+export function markOtpUsed(requestId: string) {
+  const payload = readOtpPayload(requestId);
+
+  if (!payload) return;
+
+  cleanupUsedOtpTokens();
+  usedOtpTokens.set(hashToken(requestId), payload.expiresAt);
 }
 
 export function consumeOtpRateLimit(key: string, action: "send" | "verify") {

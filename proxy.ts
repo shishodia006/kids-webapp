@@ -6,7 +6,7 @@ export function proxy(request: NextRequest) {
   const session = verifySessionToken(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 
   if (!session) {
-    const loginUrl = new URL("/login", request.url);
+    const loginUrl = new URL(pathname.startsWith("/admin") ? "/admin-login" : "/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }

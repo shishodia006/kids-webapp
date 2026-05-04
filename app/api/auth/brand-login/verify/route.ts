@@ -1,4 +1,4 @@
-﻿import { normalizeIndianPhone, verifyOtp } from "@/lib/auth/otp";
+import { markOtpUsed, normalizeIndianPhone, verifyOtp } from "@/lib/auth/otp";
 import { createBrandSessionToken, getSessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { queryOne, type DbRow } from "@/lib/db";
 import { NextResponse } from "next/server";
@@ -49,6 +49,9 @@ export async function POST(request: Request) {
       createBrandSessionToken({ phone, brandUserId: brandUser.id, brandId: brandUser.brand_id }),
       getSessionCookieOptions(),
     );
+    if (typeof requestId === "string") {
+      markOtpUsed(requestId);
+    }
     return response;
   } catch (error) {
     console.error(error);

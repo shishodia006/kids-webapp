@@ -2,6 +2,7 @@ import { createRegisteredFamily, type RegisterDetails } from "@/lib/auth/account
 import {
   consumeOtpRateLimit,
   getClientRateKey,
+  markOtpUsed,
   normalizeIndianPhone,
   verifyOtp,
 } from "@/lib/auth/otp";
@@ -61,6 +62,15 @@ export async function POST(request: Request) {
       );
     }
 
+    const registration = normalizeRegistration(body.registration, phone);
+
+    if (!registration.ok) {
+      return NextResponse.json(
+        { message: registration.message },
+        { status: 400 }
+      );
+    }
+
     const result = verifyOtp({
       requestId: body.requestId,
       phone,
@@ -71,15 +81,6 @@ export async function POST(request: Request) {
     if (!result.ok) {
       return NextResponse.json(
         { message: result.message },
-        { status: 400 }
-      );
-    }
-
-    const registration = normalizeRegistration(body.registration, phone);
-
-    if (!registration.ok) {
-      return NextResponse.json(
-        { message: registration.message },
         { status: 400 }
       );
     }
@@ -99,6 +100,8 @@ export async function POST(request: Request) {
         { status: 500 }
       );
     }
+
+    markOtpUsed(body.requestId);
 
     const response = NextResponse.json({
       message: "OTP verified successfully.",
