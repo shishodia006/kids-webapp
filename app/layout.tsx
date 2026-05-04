@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Nunito, Baloo_2 } from "next/font/google";
+import { PwaRegistration } from "./pwa-registration";
 
 const nunito = Nunito({
   subsets: ["latin"],
@@ -17,6 +18,16 @@ const baloo = Baloo_2({
 export const metadata: Metadata = {
   title: "Konnectly",
   description: "Kids memberships, partner panels, and approval workflows.",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/pwa-icon-192.png",
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Konnectly",
+  },
 };
 
 export default function RootLayout({
@@ -25,8 +36,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">{children}</body>
+    <html lang="en" className={`${nunito.variable} ${baloo.variable} h-full antialiased`}>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <PwaRegistration />
+      </body>
     </html>
   );
 }

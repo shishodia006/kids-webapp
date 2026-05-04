@@ -160,7 +160,7 @@ const topReferrers = [
 ];
 
 export default function AdminPage() {
-  const [isAuthed, setIsAuthed] = useState(false);
+  const [isAuthed, setIsAuthed] = useState(true);
   const [activeSection, setActiveSection] = useState<Section>("Memberships");
   const [error, setError] = useState("");
   const [comingSoon, setComingSoon] = useState<"Analytics" | "Settings" | null>(null);
@@ -229,7 +229,11 @@ export default function AdminPage() {
               </div>
             </div>
             <button
-              onClick={() => setIsAuthed(false)}
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                setIsAuthed(false);
+                window.location.href = "/login";
+              }}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl bg-white/10 px-4 py-2 text-xs font-black text-white transition hover:bg-white/15"
               type="button"
             >

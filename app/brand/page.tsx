@@ -16,35 +16,158 @@ import {
   Upload,
   User,
 } from "lucide-react";
-import { useState, type FormEvent, type ReactNode } from "react";
-
-const BRAND_EMAIL = "brand@konnectly.com";
-const BRAND_PASSWORD = "Brand@123";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 type Tab = "Dashboard" | "Scan QR" | "Opportunities" | "Upgrade" | "Profile";
+type LoginStep = "credentials" | "otp";
+
+type BrandLoginStartResponse = {
+  message?: string;
+  authenticated?: boolean;
+  requiresOtp?: boolean;
+  requestId?: string;
+  expiresAt?: number;
+  brandUserId?: number;
+  brandId?: number;
+  maskedMobile?: string;
+};
 
 export default function BrandPanel() {
   const [isAuthed, setIsAuthed] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("Dashboard");
+  const [loginStep, setLoginStep] = useState<LoginStep>("credentials");
+  const [requestId, setRequestId] = useState("");
+  const [expiresAt, setExpiresAt] = useState(0);
+  const [brandUserId, setBrandUserId] = useState(0);
+  const [brandId, setBrandId] = useState(0);
+  const [maskedMobile, setMaskedMobile] = useState("");
+  const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
 
-  function login(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    let active = true;
+
+    async function checkSession() {
+      try {
+        const response = await fetch("/api/auth/brand-login/status", { cache: "no-store" });
+        if (!active) return;
+        setIsAuthed(response.ok);
+      } finally {
+        if (active) setCheckingSession(false);
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setLoading(true);
+    setError("");
+
     const form = new FormData(event.currentTarget);
     const email = String(form.get("email") || "");
     const password = String(form.get("password") || "");
 
-    if (email === BRAND_EMAIL && password === BRAND_PASSWORD) {
+    try {
+      const response = await fetch("/api/auth/brand-login/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = (await response.json()) as BrandLoginStartResponse;
+
+      if (!response.ok) {
+        throw new Error(data.message ?? "Unable to login.");
+      }
+
+      if (data.authenticated && !data.requiresOtp) {
+        setIsAuthed(true);
+        return;
+      }
+
+      if (!data.requestId || !data.expiresAt || !data.brandUserId || !data.brandId) {
+        throw new Error(data.message ?? "Unable to send OTP.");
+      }
+
+      setRequestId(data.requestId);
+      setExpiresAt(data.expiresAt);
+      setBrandUserId(data.brandUserId);
+      setBrandId(data.brandId);
+      setMaskedMobile(data.maskedMobile ?? "");
+      setLoginStep("otp");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to login.");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
+    }
+  }
+
+  async function verifyBrandOtp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setLoading(true);
+    setError("");
+
+    const form = new FormData(event.currentTarget);
+    const otp = String(form.get("otp") || "").replace(/\D/g, "");
+
+    try {
+      const response = await fetch("/api/auth/brand-login/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, code: otp, brandUserId, brandId }),
+      });
+      const data = (await response.json()) as { message?: string; authenticated?: boolean };
+
+      if (!response.ok || !data.authenticated) {
+        throw new Error(data.message ?? "Unable to verify OTP.");
+      }
+
       setIsAuthed(true);
       setError("");
-      return;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to verify OTP.");
+    } finally {
+      submittingRef.current = false;
+      setLoading(false);
     }
+  }
 
-    setError("Wrong brand email or password.");
+  if (checkingSession) {
+    return (
+      <main className="grid min-h-screen place-items-center bg-[#fff9ec] px-5">
+        <p className="rounded-2xl bg-white px-5 py-4 text-sm font-black text-violet-700 shadow">Checking brand session...</p>
+      </main>
+    );
   }
 
   if (!isAuthed) {
-    return <LoginShell error={error} onSubmit={login} />;
+    return (
+      <LoginShell
+        error={error}
+        expiresAt={expiresAt}
+        loading={loading}
+        maskedMobile={maskedMobile}
+        step={loginStep}
+        onBack={() => {
+          setLoginStep("credentials");
+          setError("");
+        }}
+        onCredentialsSubmit={login}
+        onOtpSubmit={verifyBrandOtp}
+      />
+    );
   }
 
   return (
@@ -313,45 +436,112 @@ Let's grow the community together! 💜`;
         <ActionCard icon={<Gift />} title="Refer a Business & Earn" body="Share your BizKode with partners" />
         <ActionCard icon={<Download />} title="Install Konnectly Business App" body="Add to home screen for one-tap access" />
       </div>
-      <button onClick={() => setIsAuthed(false)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-4 font-black text-red-600 shadow-sm" type="button">
+      <button
+        onClick={async () => {
+          await fetch("/api/auth/logout", { method: "POST" });
+          setIsAuthed(false);
+        }}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-4 font-black text-red-600 shadow-sm"
+        type="button"
+      >
         <LogOut size={18} /> Sign Out
       </button>
     </div>
   );
 }
 
-function LoginShell({ error, onSubmit }: { error: string; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function LoginShell({
+  error,
+  expiresAt,
+  loading,
+  maskedMobile,
+  step,
+  onBack,
+  onCredentialsSubmit,
+  onOtpSubmit,
+}: {
+  error: string;
+  expiresAt: number;
+  loading: boolean;
+  maskedMobile: string;
+  step: LoginStep;
+  onBack: () => void;
+  onCredentialsSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onOtpSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const [now, setNow] = useState(0);
+  const secondsLeft = Math.max(0, Math.ceil((expiresAt - now) / 1000));
+  const minutes = Math.floor(secondsLeft / 60);
+  const seconds = (secondsLeft % 60).toString().padStart(2, "0");
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fff9ec] px-5">
-      <form onSubmit={onSubmit} className="w-full max-w-md rounded-[30px] bg-white/80 p-8 shadow-xl backdrop-blur-md">
-        <p className="text-xs font-semibold tracking-widest text-purple-600">WELCOME BACK</p>
-        <h1 className="mt-2 text-5xl font-black text-black">Login</h1>
-        <p className="mt-3 text-sm leading-relaxed text-gray-600">
-          Use your email or mobile number, then confirm with WhatsApp OTP.
-        </p>
-        <input
-          name="email"
-          type="text"
-          placeholder="Enter mobile or email"
-          className="mt-6 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-purple-400"
-        />
-        <input
-          name="password"
-          type="password"
-          placeholder="Enter password / OTP"
-          className="mt-4 w-full rounded-xl border border-gray-300 bg-gray-100 px-4 py-3 text-lg outline-none focus:ring-2 focus:ring-purple-400"
-        />
-        <div className="mt-4 rounded-xl bg-green-100 px-4 py-3 text-sm text-green-700">
-          <span className="font-semibold">WhatsApp</span> - An OTP will be sent to your registered WhatsApp number.
+    <main className="grid min-h-screen place-items-center bg-[linear-gradient(135deg,#3D32A8,#7B6FD8_62%,#E8B800)] px-5">
+      <section className="w-full max-w-md rounded-[28px] bg-white p-8 text-[#2A2448] shadow-[0_35px_90px_rgba(42,36,72,0.35)]">
+        <div className="text-4xl font-black">
+          Ko<span className="text-[#C8991E]">nn</span>ectly
         </div>
-        {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
-        <button type="submit" className="mt-6 w-full rounded-full bg-black py-4 text-base font-bold text-yellow-400 transition hover:opacity-90">
-          Send OTP & Login
-        </button>
-        <p className="mt-6 text-center text-sm text-gray-600">
-          NEW HERE? <span className="cursor-pointer font-semibold text-purple-600">CREATE ACCOUNT</span>
+        <span className="mt-5 inline-block rounded-full bg-[#F0EEFF] px-4 py-1 text-[11px] font-black uppercase tracking-[0.04em] text-[#5B4EC8]">
+          {step === "credentials" ? "Step 1 of 2 - Credentials" : "Step 2 of 2 - WhatsApp OTP"}
+        </span>
+        <p className="mt-4 text-sm font-bold leading-relaxed text-[#9090A8]">
+          {step === "credentials" ? "Brand partner login" : "Verify your identity"}
         </p>
-      </form>
+        {error && <p className="mt-3 text-sm font-semibold text-red-600">{error}</p>}
+
+        {step === "credentials" ? (
+          <form onSubmit={onCredentialsSubmit} className="mt-5">
+            <input
+              required
+              autoComplete="email"
+              name="email"
+              type="email"
+              placeholder="Brand login email"
+              className="w-full rounded-2xl border-2 border-[#EEE9FF] bg-[#F7F6FF] px-4 py-3.5 text-sm font-black outline-none focus:border-[#5B4EC8] focus:bg-white"
+            />
+            <input
+              required
+              autoComplete="current-password"
+              name="password"
+              type="password"
+              placeholder="Password"
+              className="mt-3 w-full rounded-2xl border-2 border-[#EEE9FF] bg-[#F7F6FF] px-4 py-3.5 text-sm font-black outline-none focus:border-[#5B4EC8] focus:bg-white"
+            />
+            <button disabled={loading} type="submit" className="mt-6 w-full rounded-full bg-[linear-gradient(135deg,#5B4EC8,#7B6FD8)] py-4 text-sm font-black text-white shadow-[0_8px_24px_rgba(91,78,200,0.35)] disabled:cursor-not-allowed disabled:opacity-60">
+              {loading ? "Checking..." : "Continue"}
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={onOtpSubmit} className="mt-5">
+            <div className="mb-5 rounded-2xl border border-[#d4d0ff] bg-[#f0f4ff] px-4 py-3 text-sm font-bold leading-6 text-[#5B4EC8]">
+              A 6-digit OTP has been sent to your WhatsApp number ending in <strong>{maskedMobile || "your number"}</strong>.
+              <br />
+              It expires in {minutes}:{seconds}.
+            </div>
+            <input
+              required
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              maxLength={6}
+              name="otp"
+              pattern="\d{6}"
+              placeholder="000000"
+              type="text"
+              className="w-full rounded-2xl border-2 border-[#EEE9FF] bg-[#F7F6FF] px-4 py-3.5 text-center text-2xl font-black tracking-[0.35em] outline-none focus:border-[#5B4EC8] focus:bg-white"
+            />
+            <button disabled={loading || secondsLeft <= 0} type="submit" className="mt-6 w-full rounded-full bg-[linear-gradient(135deg,#5B4EC8,#7B6FD8)] py-4 text-sm font-black text-white shadow-[0_8px_24px_rgba(91,78,200,0.35)] disabled:cursor-not-allowed disabled:opacity-60">
+              {loading ? "Verifying..." : "Verify & Enter Panel"}
+            </button>
+            <button onClick={onBack} type="button" className="mt-4 w-full text-sm font-black text-[#5B4EC8] underline">
+              Start over
+            </button>
+          </form>
+        )}
+      </section>
     </main>
   );
 }
