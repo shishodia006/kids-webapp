@@ -5,6 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "Konnectly",
     short_name: "Konnectly",
     description: "Kids memberships, partner panels, rewards, and community updates.",
+    id: "/app",
     start_url: "/app",
     scope: "/",
     display: "standalone",

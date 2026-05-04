@@ -33,6 +33,7 @@ type Voucher = { brandName: string; coupon: string; qrCode?: string; expiresAt?:
 declare global {
   interface Window {
     Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
+    konnectlyInstallApp?: () => Promise<boolean>;
   }
 }
 
@@ -53,6 +54,8 @@ export default function UserApp() {
   const [widgetOpen, setWidgetOpen] = useState(false);
   const [selectedPass, setSelectedPass] = useState<AppBooking | null>(null);
   const [currentTime, setCurrentTime] = useState("");
+  const [installWorking, setInstallWorking] = useState(false);
+  const [installMessage, setInstallMessage] = useState("");
 
   useEffect(() => {
     loadData();
@@ -119,6 +122,48 @@ export default function UserApp() {
     setWidgetOpen(false);
   }
 
+  async function handleInstallApp(showFallback = true) {
+    setStatus("");
+    setInstallMessage("Checking install option...");
+    setInstallWorking(true);
+
+    try {
+      if (isStandaloneApp()) {
+        const message = "Konnectly is already installed. Tap the browser's Open in app button to launch it.";
+        setStatus(message);
+        setInstallMessage(message);
+        return true;
+      }
+
+      const installed = await window.konnectlyInstallApp?.();
+      if (installed) {
+        const message = "Konnectly app installed. You can open it from your home screen or browser Open in app button.";
+        setWidgetOpen(false);
+        setStatus(message);
+        setInstallMessage(message);
+        return true;
+      }
+
+      const message = "Browser install prompt is not available right now. Use browser menu > Install app or Add to home screen.";
+      setInstallMessage(message);
+      if (showFallback) {
+        setWidgetOpen(true);
+      } else {
+        setStatus(message);
+      }
+
+      return false;
+    } catch {
+      const message = "Unable to open install prompt here. Use browser menu > Install app or Add to home screen.";
+      setInstallMessage(message);
+      if (showFallback) setWidgetOpen(true);
+      else setStatus(message);
+      return false;
+    } finally {
+      setInstallWorking(false);
+    }
+  }
+
   async function bookEvent(event: AppEvent, kidIds: number[]) {
     if (!data || kidIds.length === 0) return;
     await loadRazorpay();
@@ -168,6 +213,8 @@ export default function UserApp() {
             notification={latestNotification}
             onDismissNotification={dismissNotification}
             onAddKid={() => setAddKidOpen(true)}
+            onInstallApp={handleInstallApp}
+            installWorking={installWorking}
             onSwitchKid={switchKid}
           />
         ) : (
@@ -177,7 +224,7 @@ export default function UserApp() {
         <div className="min-h-0 flex-1 overflow-y-auto pb-22 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {status && <div className="m-4 rounded-[18px] bg-white p-4 text-sm font-black text-[#5f4bd2] shadow-sm ring-1 ring-[#e9e4fb]">{status}</div>}
           {data && selectedPass && <EventPassScreen booking={selectedPass} onBack={() => setSelectedPass(null)} />}
-          {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onRedeem={redeem} onOpenActivities={() => setActiveNav("Activities")} />}
+          {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onRedeem={redeem} onOpenActivities={() => setActiveNav("Activities")} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} />}
           {data && !selectedPass && activeNav === "Activities" && <ActivitiesScreen data={data} onBook={bookEvent} onOpenPass={setSelectedPass} />}
           {data && !selectedPass && activeNav === "Updates" && <UpdatesScreen notifications={data.notifications} />}
           {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} onAddKid={() => setAddKidOpen(true)} />}
@@ -197,7 +244,7 @@ export default function UserApp() {
         {data && referOpen && <ReferBottomSheet data={data} onClose={() => setReferOpen(false)} />}
         {voucher && <VoucherSheet voucher={voucher} onClose={() => setVoucher(null)} />}
         {data && addKidOpen && <AddKidSheet onClose={() => setAddKidOpen(false)} onSaved={async () => { setAddKidOpen(false); await loadData(); }} />}
-        {widgetOpen && <WidgetPrompt onClose={dismissWidget} />}
+        {widgetOpen && <WidgetPrompt onClose={dismissWidget} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} />}
       </section>
     </main>
   );
@@ -216,6 +263,8 @@ function HomeHeader({
   notification,
   onDismissNotification,
   onAddKid,
+  onInstallApp,
+  installWorking,
   onSwitchKid,
 }: {
   currentTime: string;
@@ -223,6 +272,8 @@ function HomeHeader({
   notification: AppNotification | null;
   onDismissNotification: (id: number) => void;
   onAddKid: () => void;
+  onInstallApp: () => void;
+  installWorking: boolean;
   onSwitchKid: (id: number) => void;
 }) {
   const activeKid = data?.activeKid;
@@ -237,7 +288,7 @@ function HomeHeader({
           <button className="flex h-8 items-center gap-1.5 rounded-full bg-[#f6c400] px-3 text-[11px] font-black text-[#1c1740]" type="button">
             <Star size={15} /> {data?.user.konnectPoints ?? 0}
           </button>
-          <IconCircle icon={<Download size={19} />} />
+          <IconCircle icon={<Download size={19} />} onClick={onInstallApp} label="Install Konnectly app" busy={installWorking} />
           <IconCircle icon={<Bell size={19} />} />
         </div>
       </div>
@@ -323,7 +374,7 @@ function EventPassHeader({ currentTime, onBack }: { currentTime: string; onBack:
   );
 }
 
-function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities }: { data: AppData; onOpenRefer: () => void; onRedeem: (brand: AppBrand) => void; onOpenActivities: () => void }) {
+function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities, onInstallApp, installWorking, installMessage }: { data: AppData; onOpenRefer: () => void; onRedeem: (brand: AppBrand) => void; onOpenActivities: () => void; onInstallApp: () => void; installWorking: boolean; installMessage: string }) {
   const activeKid = data.activeKid;
   const nextEvent = data.events[0];
   const offer = data.brands[0];
@@ -365,7 +416,7 @@ function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities }: { data: 
       </section>
 
       <ActionCard tone="gold" icon={<Gift size={24} />} title="Refer to Earn Points!" body="Invite a family and share your KonnektKode" onClick={onOpenRefer} />
-      <ActionCard tone="purple" icon={<Download size={25} />} title="Install Konnectly App" body="Use browser install or add to home screen" onClick={() => { void window.konnectlyInstallApp?.(); }} />
+      <ActionCard tone="purple" icon={<Download size={25} />} title={installWorking ? "Checking Install..." : "Install Konnectly App"} body={installMessage || "Use browser install or add to home screen"} onClick={onInstallApp} busy={installWorking} />
 
       <section>
         <h2 className="mb-2 text-sm font-black text-[#292444]">Redeem Rewards</h2>
@@ -693,7 +744,7 @@ function SheetInput({ label, value, onChange, placeholder, type = "text" }: { la
   );
 }
 
-function WidgetPrompt({ onClose }: { onClose: () => void }) {
+function WidgetPrompt({ onClose, onInstallApp, installWorking, installMessage }: { onClose: () => void; onInstallApp: (showFallback?: boolean) => Promise<boolean>; installWorking: boolean; installMessage: string }) {
   return (
     <div className="absolute inset-0 z-50 grid place-items-center bg-[#161332]/70 px-5 backdrop-blur-sm">
       <div className="w-full rounded-[28px] bg-white p-6 text-center shadow-2xl">
@@ -703,7 +754,8 @@ function WidgetPrompt({ onClose }: { onClose: () => void }) {
           <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>iOS:</b> Tap Share in Safari, choose Add to Home Screen, then tap Add.</div>
           <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open browser menu, choose Install app or Add to Home screen, then confirm.</div>
         </div>
-        <button onClick={() => { void window.konnectlyInstallApp?.(); onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white" type="button">Add to Home Screen</button>
+        {installMessage && <p className="mt-4 rounded-2xl bg-[#fff8df] p-3 text-xs font-black leading-5 text-[#8a6500]">{installMessage}</p>}
+        <button disabled={installWorking} onClick={async () => { if (await onInstallApp(false)) onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white transition active:scale-[0.98] disabled:opacity-65" type="button">{installWorking ? "Checking..." : "Add to Home Screen"}</button>
         <button onClick={onClose} className="mt-3 w-full rounded-full border-2 border-[#e3e0f4] px-5 py-3 text-sm font-black text-[#6655cf]" type="button">Maybe Later</button>
       </div>
     </div>
@@ -814,20 +866,24 @@ function KidAvatar({ kid, size, large }: { kid: AppKid; size: number; large?: bo
   );
 }
 
-function IconCircle({ icon }: { icon: ReactNode }) {
-  return <button className="grid h-8 w-8 place-items-center rounded-full border border-white/25 bg-white/12 text-white" type="button">{icon}</button>;
+function IconCircle({ icon, onClick, label, busy }: { icon: ReactNode; onClick?: () => void; label?: string; busy?: boolean }) {
+  return (
+    <button onClick={() => onClick?.()} disabled={busy} className="grid h-8 w-8 place-items-center rounded-full border border-white/25 bg-white/12 text-white transition active:scale-90 disabled:opacity-65" type="button" aria-label={label}>
+      {icon}
+    </button>
+  );
 }
 
-function ActionCard({ tone, icon, title, body, onClick }: { tone: "gold" | "purple"; icon: ReactNode; title: string; body: string; onClick?: () => void }) {
+function ActionCard({ tone, icon, title, body, onClick, busy }: { tone: "gold" | "purple"; icon: ReactNode; title: string; body: string; onClick?: () => void; busy?: boolean }) {
   const isGold = tone === "gold";
   return (
-    <button onClick={onClick} className={`flex w-full items-center gap-3 rounded-[20px] border-2 p-3.5 text-left ${isGold ? "border-[#e6b800] bg-[#fff6c9]" : "border-[#7765dd] bg-[#e9e3ff]"}`} type="button">
-      <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`}>{icon}</span>
+    <button onClick={() => onClick?.()} disabled={busy} className={`flex w-full items-center gap-3 rounded-[20px] border-2 p-3.5 text-left shadow-sm transition hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.99] disabled:cursor-wait disabled:opacity-80 ${isGold ? "border-[#e6b800] bg-[#fff6c9] hover:shadow-[#e6b800]/20" : "border-[#7765dd] bg-[#e9e3ff] hover:shadow-[#7765dd]/20"}`} type="button">
+      <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white transition ${busy ? "animate-pulse" : ""} ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className={`block text-sm font-black ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`}>{title}</span>
         <span className="mt-1 block text-xs font-bold text-[#8d89a6]">{body}</span>
       </span>
-      <ChevronRight className={isGold ? "text-[#c99000]" : "text-[#5f4bd2]"} />
+      <ChevronRight className={`shrink-0 transition ${busy ? "translate-x-1" : ""} ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`} />
     </button>
   );
 }
@@ -916,4 +972,8 @@ function startOfToday() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return today.getTime();
+}
+
+function isStandaloneApp() {
+  return window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
 }

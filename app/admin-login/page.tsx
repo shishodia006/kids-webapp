@@ -40,12 +40,12 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#fbf4e5] px-4 py-5 text-white">
+    <main className="grid min-h-screen place-items-center bg-[] px-4 py-5 text-white">
       <section className="w-full max-w-[460px] rounded-[24px] border border-white/10 bg-white px-6 py-7 text-[#1a1a1a] shadow-[0_28px_90px_rgba(0,0,0,0.32)] sm:px-8">
-        <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#f6c400] text-[#111827]">
+        {/* <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#f6c400] text-[#111827]">
           <ShieldCheck size={30} strokeWidth={2.5} />
         </div>
-        <p className="mt-6 text-[11px] font-black uppercase tracking-[0.22em] text-[#5f4bd3]">Admin Access</p>
+        <p className="mt-6 text-[11px] font-black uppercase tracking-[0.22em] text-[#5f4bd3]">Admin Access</p> */}
         <h1 className="mt-3 text-4xl font-black leading-none">Admin Login</h1>
         <p className="mt-4 text-sm font-semibold leading-6 text-zinc-600">
           Sign in with the Konnectly admin email and password to manage the dashboard.
@@ -98,8 +98,8 @@ export default function AdminLoginPage() {
             {loading ? "Logging in..." : "Open Admin Dashboard"}
           </button>
 
-          <p className="text-center text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
-            First Build · v1.0.0
+          <p className="text-center text-[11px] font-black  tracking-[0.18em] text-zinc-400">
+            Version · v1.0.1
           </p>
         </form>
 

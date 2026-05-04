@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import { Eye, EyeOff } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
@@ -8,6 +9,7 @@ export default function LoginPage() {
   const router = useRouter();
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -59,14 +61,24 @@ export default function LoginPage() {
             placeholder="9811297908"
             type="tel"
           />
-          <input
-            required
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            className="h-[48px] w-full min-w-0 rounded-[14px] border-[2px] border-[#cbd6e6] bg-[#e8f0fd] px-4 text-[14px] font-semibold text-black outline-none transition placeholder:text-black/45 focus:border-[#b9c7dc] focus:ring-0"
-            placeholder="Password"
-            type="password"
-          />
+          <div className="relative">
+            <input
+              required
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              className="h-[48px] w-full min-w-0 rounded-[14px] border-[2px] border-[#cbd6e6] bg-[#e8f0fd] px-4 pr-12 text-[14px] font-semibold text-black outline-none transition placeholder:text-black/45 focus:border-[#b9c7dc] focus:ring-0"
+              placeholder="Password"
+              type={showPassword ? "text" : "password"}
+            />
+            <button
+              type="button"
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              onClick={() => setShowPassword((current) => !current)}
+              className="absolute right-3 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-[#5f4bd3] transition hover:bg-white/70 focus:outline-none focus:ring-2 focus:ring-[#b9c7dc]"
+            >
+              {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+            </button>
+          </div>
           <button
             disabled={loading || normalizedPhone.length !== 10 || password.length === 0}
             type="submit"
@@ -93,7 +105,7 @@ export default function LoginPage() {
           </p>
         </form>
 
-        {status && <p className="mx-auto mt-4 max-w-[360px] text-sm font-black text-[#6d5fde]">{status}</p>}
+        {status && <p className="mx-auto mt-4 max-w-[360px] text-sm font-black text-[#6d5fde] text-center">{status}</p>}
       </section>
     </main>
   );
