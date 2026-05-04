@@ -401,6 +401,45 @@ export async function updateRedemptionStatus(redemptionId: number, status: "issu
   await executeQuery("UPDATE redemptions SET status = ? WHERE id = ?", [status, redemptionId]);
 }
 
+export async function checkInBooking(bookingId: number) {
+  await requireAdmin();
+  await ensureAdminProductSchema();
+
+  const booking = await queryOne<AnyRow>(
+    `SELECT b.*, e.title AS event_title
+     FROM bookings b
+     LEFT JOIN events e ON e.id = b.event_id
+     WHERE b.id = ?
+     LIMIT 1`,
+    [bookingId],
+  );
+
+  if (!booking) throw new Error("Booking not found.");
+  if (booking.checked_in_at) return;
+
+  const attendancePoints = Math.max(0, num(booking.points_total) - num(booking.points_awarded_on_payment) - num(booking.points_awarded_on_attendance));
+
+  await executeQuery(
+    "UPDATE bookings SET checked_in_at = NOW(), points_awarded_on_attendance = points_awarded_on_attendance + ? WHERE id = ?",
+    [attendancePoints, bookingId],
+  );
+
+  if (attendancePoints > 0) {
+    await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [attendancePoints, num(booking.user_id)]);
+    await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [attendancePoints, num(booking.kid_id)]);
+    await executeQuery(
+      "INSERT INTO point_ledger (user_id, kid_id, source, points, description, ref_type, ref_id) VALUES (?, ?, 'event_attendance', ?, ?, 'booking', ?)",
+      [
+        num(booking.user_id),
+        num(booking.kid_id),
+        attendancePoints,
+        `${attendancePoints} points credited for attending ${str(booking.event_title) || "an event"}`,
+        bookingId,
+      ],
+    );
+  }
+}
+
 async function generateKidCode(kidId: number) {
   const kid = await queryOne<AnyRow>("SELECT child_name FROM kids WHERE id = ? LIMIT 1", [kidId]);
   const base = str(kid?.child_name).replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase() || "KID";

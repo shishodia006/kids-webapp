@@ -1,6 +1,6 @@
 "use client";
 
-import { LockKeyhole, Mail, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -9,6 +9,7 @@ export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -39,7 +40,7 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#111827] px-4 py-5 text-white">
+    <main className="grid min-h-screen place-items-center bg-[#fbf4e5] px-4 py-5 text-white">
       <section className="w-full max-w-[460px] rounded-[24px] border border-white/10 bg-white px-6 py-7 text-[#1a1a1a] shadow-[0_28px_90px_rgba(0,0,0,0.32)] sm:px-8">
         <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#f6c400] text-[#111827]">
           <ShieldCheck size={30} strokeWidth={2.5} />
@@ -68,7 +69,7 @@ export default function AdminLoginPage() {
 
           <label className="grid gap-1.5 text-xs font-black text-zinc-700">
             Password
-            <span className="grid h-[52px] grid-cols-[42px_minmax(0,1fr)] items-center rounded-[15px] border-2 border-[#d9e2ef] bg-[#eef4ff] px-3">
+            <span className="grid h-[52px] grid-cols-[42px_minmax(0,1fr)_42px] items-center rounded-[15px] border-2 border-[#d9e2ef] bg-[#eef4ff] px-3">
               <LockKeyhole size={19} className="text-[#5f4bd3]" />
               <input
                 required
@@ -76,8 +77,16 @@ export default function AdminLoginPage() {
                 onChange={(event) => setPassword(event.target.value)}
                 className="h-full min-w-0 bg-transparent text-sm font-bold outline-none placeholder:text-zinc-500"
                 placeholder="Admin password"
-                type="password"
+                type={showPassword ? "text" : "password"}
               />
+              <button
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="grid h-9 w-9 place-items-center rounded-full text-[#5f4bd3] transition hover:bg-white/70"
+                onClick={() => setShowPassword((value) => !value)}
+                type="button"
+              >
+                {showPassword ? <EyeOff size={19} /> : <Eye size={19} />}
+              </button>
             </span>
           </label>
 
@@ -88,6 +97,10 @@ export default function AdminLoginPage() {
           >
             {loading ? "Logging in..." : "Open Admin Dashboard"}
           </button>
+
+          <p className="text-center text-[11px] font-black uppercase tracking-[0.18em] text-zinc-400">
+            First Build · v1.0.0
+          </p>
         </form>
 
         {status && <p className="mt-5 text-sm font-black text-[#5f4bd3]">{status}</p>}

@@ -312,7 +312,7 @@ function RegisterFlow() {
               <WidgetStep title="iOS" body="Tap Share in Safari, choose Add to Home Screen, then tap Add." />
               <WidgetStep title="Android" body="Open the browser menu, choose Install app or Add to Home screen, then confirm." />
             </div>
-            <button type="button" onClick={() => window.konnectlyRequestNotifications?.()} className="mt-7 flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white">
+            <button type="button" onClick={() => { void window.konnectlyInstallApp?.(); }} className="mt-7 flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white">
               <Bell size={18} /> Add to Home Screen
             </button>
             <button type="button" onClick={() => router.push("/app")} className="mt-3 w-full rounded-full border-2 border-[#dcd7ff] bg-white px-5 py-3 text-sm font-black text-[#5f4bd3]">

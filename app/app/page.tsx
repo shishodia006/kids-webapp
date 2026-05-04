@@ -365,7 +365,7 @@ function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities }: { data: 
       </section>
 
       <ActionCard tone="gold" icon={<Gift size={24} />} title="Refer to Earn Points!" body="Invite a family and share your KonnektKode" onClick={onOpenRefer} />
-      <ActionCard tone="purple" icon={<Download size={25} />} title="Install Konnectly App" body="Use browser install or add to home screen" onClick={() => window.konnectlyRequestNotifications?.()} />
+      <ActionCard tone="purple" icon={<Download size={25} />} title="Install Konnectly App" body="Use browser install or add to home screen" onClick={() => { void window.konnectlyInstallApp?.(); }} />
 
       <section>
         <h2 className="mb-2 text-sm font-black text-[#292444]">Redeem Rewards</h2>
@@ -703,7 +703,7 @@ function WidgetPrompt({ onClose }: { onClose: () => void }) {
           <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>iOS:</b> Tap Share in Safari, choose Add to Home Screen, then tap Add.</div>
           <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open browser menu, choose Install app or Add to Home screen, then confirm.</div>
         </div>
-        <button onClick={() => { window.konnectlyRequestNotifications?.(); onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white" type="button">Add to Home Screen</button>
+        <button onClick={() => { void window.konnectlyInstallApp?.(); onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white" type="button">Add to Home Screen</button>
         <button onClick={onClose} className="mt-3 w-full rounded-full border-2 border-[#e3e0f4] px-5 py-3 text-sm font-black text-[#6655cf]" type="button">Maybe Later</button>
       </div>
     </div>

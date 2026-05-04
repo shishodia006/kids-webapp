@@ -4,10 +4,16 @@ import { useEffect } from "react";
 
 declare global {
   interface Window {
+    konnectlyInstallApp?: () => Promise<boolean>;
     konnectlyNotify?: (notification: KonnectlyNotificationPayload) => Promise<boolean>;
     konnectlyRequestNotifications?: () => Promise<NotificationPermission>;
   }
 }
+
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
 
 type KonnectlyNotificationPayload = {
   title: string;
@@ -22,6 +28,30 @@ export function PwaRegistration() {
     if (!("serviceWorker" in navigator)) return;
 
     let active = true;
+    let deferredInstallPrompt: BeforeInstallPromptEvent | null = null;
+
+    function handleBeforeInstallPrompt(event: Event) {
+      event.preventDefault();
+      deferredInstallPrompt = event as BeforeInstallPromptEvent;
+    }
+
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+
+    window.konnectlyInstallApp = async () => {
+      if (!deferredInstallPrompt) {
+        await window.konnectlyRequestNotifications?.();
+        return false;
+      }
+
+      const prompt = deferredInstallPrompt;
+      deferredInstallPrompt = null;
+      await prompt.prompt();
+      const choice = await prompt.userChoice;
+      if (choice.outcome === "accepted") {
+        await window.konnectlyRequestNotifications?.();
+      }
+      return choice.outcome === "accepted";
+    };
 
     async function registerServiceWorker() {
       try {
@@ -62,6 +92,8 @@ export function PwaRegistration() {
 
     return () => {
       active = false;
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      delete window.konnectlyInstallApp;
     };
   }, []);
 
@@ -71,7 +103,16 @@ export function PwaRegistration() {
 async function savePushSubscription(registration: ServiceWorkerRegistration) {
   if (!("PushManager" in window)) return;
 
-  const subscription = await registration.pushManager.getSubscription();
+  let subscription = await registration.pushManager.getSubscription();
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+
+  if (!subscription && publicKey) {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  }
+
   if (!subscription) return;
 
   await fetch("/api/app/push-subscription", {
@@ -79,4 +120,17 @@ async function savePushSubscription(registration: ServiceWorkerRegistration) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ subscription: subscription.toJSON() }),
   }).catch(() => undefined);
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = window.atob(base64);
+  const output = new Uint8Array(rawData.length);
+
+  for (let index = 0; index < rawData.length; index += 1) {
+    output[index] = rawData.charCodeAt(index);
+  }
+
+  return output;
 }

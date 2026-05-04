@@ -20,8 +20,12 @@ export const metadata: Metadata = {
   description: "Kids memberships, partner panels, and approval workflows.",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/favicon.png",
-    apple: "/pwa-icon-192.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/pwa-icon-192.png", sizes: "192x192", type: "image/png" }],
   },
   appleWebApp: {
     capable: true,
