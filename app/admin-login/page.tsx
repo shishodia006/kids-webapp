@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -93,8 +93,14 @@ export default function AdminLoginPage() {
           <button
             disabled={loading || !email.trim() || !password}
             type="submit"
-            className="mt-2 h-14 rounded-full bg-[#111827] px-6 text-sm font-black text-[#f6c400] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
+            className="mt-2 flex h-14 items-center justify-center gap-2 rounded-full bg-[#111827] px-6 text-sm font-black text-[#f6c400] transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-55"
           >
+            {loading && (
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-[#f6c400]/30 border-t-[#f6c400]"
+              />
+            )}
             {loading ? "Logging in..." : "Open Admin Dashboard"}
           </button>
 

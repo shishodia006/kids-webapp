@@ -33,6 +33,7 @@ export type AppKid = {
   photo: string;
   schoolIdCard: string;
   status: string;
+  gender: string;
   konnektPoints: number;
   konnektKode: string;
 };
@@ -118,6 +119,8 @@ type BrandRow = DbRow & Record<string, unknown>;
 type NotificationRow = DbRow & Record<string, unknown>;
 type RewardHistoryRow = DbRow & Record<string, unknown>;
 
+let productSchemaReady: Promise<void> | null = null;
+
 export async function getCurrentSession() {
   const cookieStore = await cookies();
   return verifySessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
@@ -134,7 +137,6 @@ export async function requireCurrentUser() {
 }
 
 export async function getAppData(origin = ""): Promise<AppData> {
-  await ensureProductSchema();
   const user = await requireCurrentUser();
   const cookieStore = await cookies();
   const seenNotifId = Number(cookieStore.get("konnectly_seen_notif")?.value || 0);
@@ -186,7 +188,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
 }
 
 export async function addChildProfile(input: Record<string, unknown>) {
-  await ensureProductSchema();
+  await ensureProductSchemaOnce();
   const user = await requireCurrentUser();
   const currentKids = await queryRows<KidRow>("SELECT id FROM kids WHERE parent_id = ?", [user.id]);
   if (currentKids.length >= 3) throw new Error("You can add up to 3 child profiles.");
@@ -230,6 +232,80 @@ export async function addChildProfile(input: Record<string, unknown>) {
   return { message: `${childName}'s profile is currently under verification.` };
 }
 
+export async function updateParentProfile(input: Record<string, unknown>) {
+  await ensureProductSchemaOnce();
+  const user = await requireCurrentUser();
+
+  const parentName = clean(input.parentName);
+  const email = clean(input.email).toLowerCase();
+  const fatherName = clean(input.fatherName);
+  const motherName = clean(input.motherName);
+  const alternateMobile = clean(input.alternateMobile);
+  const profession = clean(input.profession);
+  const address = clean(input.address);
+  const locality = clean(input.locality);
+  const city = clean(input.city);
+  const state = clean(input.state);
+  const pincode = clean(input.pincode);
+
+  if (!parentName) throw new Error("Parent name is required.");
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Please enter a valid email address.");
+
+  await executeQuery(
+    `
+    UPDATE users
+    SET
+      parent_name = ?,
+      email = ?,
+      father_name = ?,
+      mother_name = ?,
+      alternate_mobile = ?,
+      profession = ?,
+      address = ?,
+      locality = ?,
+      city = ?,
+      state = ?,
+      pincode = ?
+    WHERE id = ?
+    `,
+    [parentName, email || null, fatherName || null, motherName || null, alternateMobile || null, profession || null, address || null, locality || null, city || null, state || null, pincode || null, user.id],
+  );
+
+  return { message: "Parent profile updated." };
+}
+
+export async function updateChildProfile(input: Record<string, unknown>) {
+  await ensureProductSchemaOnce();
+  const user = await requireCurrentUser();
+  const kidId = Number(input.kidId);
+  if (!kidId) throw new Error("Kid profile is required.");
+
+  const childName = clean(input.childName);
+  const dob = clean(input.dob);
+  const school = clean(input.school);
+  const gender = clean(input.gender) || "All";
+
+  if (!childName || !dob || !school) {
+    throw new Error("Child name, date of birth, and school name are required.");
+  }
+
+  const birthDate = new Date(dob);
+  if (Number.isNaN(birthDate.getTime())) throw new Error("Please enter a valid date of birth.");
+  const age = calculateAge(birthDate);
+
+  const result = await executeQuery(
+    `
+    UPDATE kids
+    SET child_name = ?, dob = ?, age = ?, school = ?, gender = ?
+    WHERE id = ? AND parent_id = ?
+    `,
+    [childName, birthDate, age, school, gender, kidId, user.id],
+  );
+
+  if (!result.affectedRows) throw new Error("Kid profile not found.");
+  return { message: "Kid profile updated." };
+}
+
 export async function switchActiveKid(kidId: number) {
   const user = await requireCurrentUser();
   const kid = await queryOne<KidRow>("SELECT id FROM kids WHERE id = ? AND parent_id = ? LIMIT 1", [kidId, user.id]);
@@ -250,7 +326,7 @@ export async function dismissWidgetSetup() {
 }
 
 export async function savePushSubscription(subscription: unknown) {
-  await ensureProductSchema();
+  await ensureProductSchemaOnce();
   const user = await requireCurrentUser();
   const value = subscription && typeof subscription === "object" ? subscription as Record<string, unknown> : null;
   const endpoint = typeof value?.endpoint === "string" ? value.endpoint : "";
@@ -270,7 +346,7 @@ export async function savePushSubscription(subscription: unknown) {
 }
 
 export async function redeemBrand(brandId: number) {
-  await ensureProductSchema();
+  await ensureProductSchemaOnce();
   const user = await requireCurrentUser();
   const cookieStore = await cookies();
   const activeKidId = Number(cookieStore.get("konnectly_active_kid_id")?.value || 0);
@@ -313,7 +389,7 @@ export async function redeemBrand(brandId: number) {
 }
 
 export async function confirmBooking({ eventId, kidIds, amount, razorpayPaymentId, origin }: { eventId: number; kidIds: number[]; amount: number; razorpayPaymentId: string; origin: string }) {
-  await ensureProductSchema();
+  await ensureProductSchemaOnce();
   const user = await requireCurrentUser();
   const cleanKidIds = [...new Set(kidIds.filter(Number))];
   if (!cleanKidIds.length) throw new Error("Select at least one kid.");
@@ -409,6 +485,7 @@ function mapKid(row: KidRow): AppKid {
     photo: publicPath(str(row.photo)),
     schoolIdCard: str(row.school_id_card_data) || publicPath(str(row.school_id_card)),
     status: str(row.status) || "pending",
+    gender: str(row.gender) || "All",
     konnektPoints: num(row.konnekt_points),
     konnektKode: str(row.konnekt_kode),
   };
@@ -486,8 +563,6 @@ function isEligibleForEvent(kid: AppKid, user: AppUser, event: AppEvent) {
   if (kid.status !== "approved") return false;
   if (event.minAge && kid.age < event.minAge) return false;
   if (event.maxAge && kid.age > event.maxAge) return false;
-  if (event.gender && event.gender !== "All") return false;
-  if (event.restrictedArea && ![user.locality, user.city].some((value) => value.toLowerCase() === event.restrictedArea.toLowerCase())) return false;
   return true;
 }
 
@@ -574,4 +649,12 @@ async function ensureProductSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+}
+
+async function ensureProductSchemaOnce() {
+  productSchemaReady ??= ensureProductSchema().catch((error) => {
+    productSchemaReady = null;
+    throw error;
+  });
+  await productSchemaReady;
 }

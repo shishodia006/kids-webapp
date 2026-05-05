@@ -44,6 +44,8 @@ const navItems: Array<{ label: NavLabel; icon: typeof Home }> = [
   { label: "Account", icon: User },
 ];
 
+const APP_DATA_CACHE_KEY = "konnectly_app_data_v1";
+
 export default function UserApp() {
   const [data, setData] = useState<AppData | null>(null);
   const [status, setStatus] = useState("Loading your Konnectly dashboard...");
@@ -51,6 +53,8 @@ export default function UserApp() {
   const [referOpen, setReferOpen] = useState(false);
   const [voucher, setVoucher] = useState<Voucher | null>(null);
   const [addKidOpen, setAddKidOpen] = useState(false);
+  const [editParentOpen, setEditParentOpen] = useState(false);
+  const [editingKid, setEditingKid] = useState<AppKid | null>(null);
   const [widgetOpen, setWidgetOpen] = useState(false);
   const [selectedPass, setSelectedPass] = useState<AppBooking | null>(null);
   const [currentTime, setCurrentTime] = useState("");
@@ -58,6 +62,14 @@ export default function UserApp() {
   const [installMessage, setInstallMessage] = useState("");
 
   useEffect(() => {
+    const cached = readCachedAppData();
+    if (cached) {
+      window.setTimeout(() => {
+        setData(cached);
+        setWidgetOpen(Boolean(cached.showWidgetSetup));
+        setStatus("");
+      }, 0);
+    }
     loadData();
   }, []);
 
@@ -76,12 +88,14 @@ export default function UserApp() {
     try {
       const response = await fetch("/api/app/data", { cache: "no-store" });
       if (response.status === 401) {
+        clearCachedAppData();
         window.location.href = "/login?next=/app";
         return;
       }
       const nextData = await response.json();
       if (!response.ok) throw new Error(nextData.message || "Unable to load app data.");
       setData(nextData);
+      cacheAppData(nextData);
       setWidgetOpen(Boolean(nextData.showWidgetSetup));
       setStatus("");
     } catch (error) {
@@ -227,7 +241,7 @@ export default function UserApp() {
           {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onRedeem={redeem} onOpenActivities={() => setActiveNav("Activities")} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} />}
           {data && !selectedPass && activeNav === "Activities" && <ActivitiesScreen data={data} onBook={bookEvent} onOpenPass={setSelectedPass} />}
           {data && !selectedPass && activeNav === "Updates" && <UpdatesScreen notifications={data.notifications} />}
-          {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} onAddKid={() => setAddKidOpen(true)} />}
+          {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} onAddKid={() => setAddKidOpen(true)} onEditParent={() => setEditParentOpen(true)} onEditKid={setEditingKid} onOpenRefer={() => setReferOpen(true)} />}
         </div>
 
         <a
@@ -244,6 +258,8 @@ export default function UserApp() {
         {data && referOpen && <ReferBottomSheet data={data} onClose={() => setReferOpen(false)} />}
         {voucher && <VoucherSheet voucher={voucher} onClose={() => setVoucher(null)} />}
         {data && addKidOpen && <AddKidSheet onClose={() => setAddKidOpen(false)} onSaved={async () => { setAddKidOpen(false); await loadData(); }} />}
+        {data && editParentOpen && <EditParentSheet data={data} onClose={() => setEditParentOpen(false)} onSaved={async () => { setEditParentOpen(false); await loadData(); }} />}
+        {editingKid && <EditKidSheet kid={editingKid} onClose={() => setEditingKid(null)} onSaved={async () => { setEditingKid(null); await loadData(); }} />}
         {widgetOpen && <WidgetPrompt onClose={dismissWidget} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} />}
       </section>
     </main>
@@ -499,17 +515,17 @@ function EventList({ events, kids, onBook }: { events: AppEvent[]; kids: AppKid[
               <div className="mt-3 flex flex-wrap gap-2">
                 {kids.map((kid) => {
                   const active = kidIds.includes(kid.id);
-                  const verified = kid.status === "approved";
+                  const eligibility = getKidEventEligibility(kid, event);
                   return (
                     <button
                       key={kid.id}
-                      disabled={!verified}
+                      disabled={!eligibility.eligible}
                       onClick={() => setSelected((current) => ({ ...current, [event.id]: active ? kidIds.filter((id) => id !== kid.id) : [...kidIds, kid.id] }))}
                       className={`rounded-full px-3 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400 ${active ? "bg-[#5f4bd2] text-white" : "bg-[#eee7ff] text-[#5f4bd2]"}`}
                       type="button"
-                      title={verified ? kid.childName : "Verification pending"}
+                      title={eligibility.reason || kid.childName}
                     >
-                      {kid.childName}{verified ? "" : " | Pending"}
+                      {kid.childName}{eligibility.reason ? ` | ${eligibility.reason}` : ""}
                     </button>
                   );
                 })}
@@ -592,7 +608,7 @@ function UpdatesScreen({ notifications }: { notifications: AppNotification[] }) 
   );
 }
 
-function AccountScreen({ data, onSwitchKid, onAddKid }: { data: AppData; onSwitchKid: (id: number) => void; onAddKid: () => void }) {
+function AccountScreen({ data, onSwitchKid, onAddKid, onEditParent, onEditKid, onOpenRefer }: { data: AppData; onSwitchKid: (id: number) => void; onAddKid: () => void; onEditParent: () => void; onEditKid: (kid: AppKid) => void; onOpenRefer: () => void }) {
   return (
     <div className="space-y-4 px-4 py-4">
       <div className="rounded-[20px] bg-white p-5 text-center shadow-sm ring-1 ring-[#e9e4fb]">
@@ -607,6 +623,14 @@ function AccountScreen({ data, onSwitchKid, onAddKid }: { data: AppData; onSwitc
         </div>
         <div className="mx-auto mt-4 w-fit rounded-full bg-[#5f4bd2] px-5 py-2 text-xs font-black tracking-[0.22em] text-[#f6c400]">{data.user.konnektKode || "KK-XXXXX"}</div>
         <p className="mt-3 text-xs font-black text-[#8d89a6]">Your KonnektKode - share to refer families</p>
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
+          <button onClick={onOpenRefer} className="rounded-full bg-[#f6c400] px-4 py-3 text-xs font-black text-[#292444]" type="button">
+            Refer & Earn
+          </button>
+          <button onClick={onEditParent} className="rounded-full bg-[#eee7ff] px-4 py-3 text-xs font-black text-[#5f4bd2]" type="button">
+            Edit Profile
+          </button>
+        </div>
       </div>
 
       <section>
@@ -617,17 +641,24 @@ function AccountScreen({ data, onSwitchKid, onAddKid }: { data: AppData; onSwitc
         <div className="space-y-3">
           {data.kids.length === 0 && <EmptyState text="No kid profiles found for this account." />}
           {data.kids.map((kid) => (
-            <button key={kid.id} onClick={() => onSwitchKid(kid.id)} className={`flex w-full items-center gap-3 rounded-[20px] bg-white p-4 text-left shadow-sm ring-1 transition active:scale-[0.99] ${data.activeKid?.id === kid.id ? "ring-2 ring-[#e6b800]" : "ring-[#e9e4fb]"}`} type="button">
-              <KidAvatar kid={kid} size={48} />
-              <span className="min-w-0 flex-1">
-                <span className="block text-base font-black text-[#292444]">
-                  {kid.childName}
-                  {data.activeKid?.id === kid.id && <span className="ml-2 text-xs font-black uppercase tracking-[0.14em] text-[#c99000]">· Active</span>}
+            <div key={kid.id} className={`flex w-full items-center gap-3 rounded-[20px] bg-white p-4 text-left shadow-sm ring-1 transition ${data.activeKid?.id === kid.id ? "ring-2 ring-[#e6b800]" : "ring-[#e9e4fb]"}`}>
+              <button onClick={() => onSwitchKid(kid.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]" type="button">
+                <KidAvatar kid={kid} size={48} />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-base font-black text-[#292444]">
+                    {kid.childName}
+                    {data.activeKid?.id === kid.id && <span className="ml-2 text-xs font-black uppercase tracking-[0.14em] text-[#c99000]">· Active</span>}
+                  </span>
+                  <span className="mt-1 block text-xs font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
                 </span>
-                <span className="mt-1 block text-xs font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
-              </span>
-              <span className={`rounded-full px-3 py-1 text-xs font-black ${kid.status === "approved" ? "bg-green-100 text-green-700" : "bg-[#fff8df] text-[#c99000]"}`}>{kid.status === "approved" ? "Verified" : "Verification Pending"}</span>
-            </button>
+              </button>
+              <div className="grid shrink-0 justify-items-end gap-2">
+                <span className={`rounded-full px-3 py-1 text-xs font-black ${kid.status === "approved" ? "bg-green-100 text-green-700" : "bg-[#fff8df] text-[#c99000]"}`}>{kid.status === "approved" ? "Verified" : "Verification Pending"}</span>
+                <button onClick={() => onEditKid(kid)} className="rounded-full bg-[#eee7ff] px-3 py-1.5 text-xs font-black text-[#5f4bd2]" type="button">
+                  Edit
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       </section>
@@ -636,6 +667,7 @@ function AccountScreen({ data, onSwitchKid, onAddKid }: { data: AppData; onSwitc
         onClick={async () => {
           if (!window.confirm("Are you sure you want to sign out?")) return;
           await fetch("/api/auth/logout", { method: "POST" });
+          clearCachedAppData();
           window.location.href = "/login";
         }}
         className="w-full rounded-full bg-[#1b1b1b] px-5 py-3 text-sm font-black text-[#ffc52e]"
@@ -735,11 +767,127 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   );
 }
 
-function SheetInput({ label, value, onChange, placeholder, type = "text" }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; type?: string }) {
+function EditParentSheet({ data, onClose, onSaved }: { data: AppData; onClose: () => void; onSaved: () => void }) {
+  const user = data.user;
+  const [parentName, setParentName] = useState(user.parentName);
+  const [email, setEmail] = useState(user.email);
+  const [fatherName, setFatherName] = useState(user.fatherName);
+  const [motherName, setMotherName] = useState(user.motherName);
+  const [alternateMobile, setAlternateMobile] = useState(user.alternateMobile);
+  const [profession, setProfession] = useState(user.profession);
+  const [address, setAddress] = useState(user.address);
+  const [locality, setLocality] = useState(user.locality);
+  const [city, setCity] = useState(user.city);
+  const [state, setState] = useState(user.state);
+  const [pincode, setPincode] = useState(user.pincode);
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setStatus("");
+    try {
+      await postJson("/api/app/profile", { parentName, email, fatherName, motherName, alternateMobile, profession, address, locality, city, state, pincode });
+      await onSaved();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to update parent profile.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-40 flex items-end bg-[#161332]/55 backdrop-blur-sm">
+      <button className="absolute inset-0 cursor-default" type="button" aria-label="Close edit parent" onClick={onClose} />
+      <form onSubmit={submit} className="relative max-h-[88%] w-full overflow-y-auto rounded-t-[32px] bg-white px-5 pb-7 pt-3 shadow-2xl [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-zinc-300" />
+        <button onClick={onClose} className="absolute right-5 top-5 text-[#8d89a6]" type="button" aria-label="Close"><X size={20} /></button>
+        <h2 className="text-xl font-black text-[#292444]">Edit Parent Profile</h2>
+        <p className="mt-2 text-sm font-bold text-[#8d89a6]">Mobile number stays locked because it is used for login.</p>
+        <div className="mt-5 grid gap-3">
+          <SheetInput label="Parent Name" value={parentName} onChange={setParentName} placeholder="Parent name" />
+          <SheetInput label="Email" value={email} onChange={setEmail} placeholder="parent@example.com" type="email" required={false} />
+          <SheetInput label="Father Name" value={fatherName} onChange={setFatherName} placeholder="Father name" required={false} />
+          <SheetInput label="Mother Name" value={motherName} onChange={setMotherName} placeholder="Mother name" required={false} />
+          <SheetInput label="Alternate Mobile" value={alternateMobile} onChange={setAlternateMobile} placeholder="Alternate mobile" required={false} />
+          <SheetInput label="Profession" value={profession} onChange={setProfession} placeholder="Profession" required={false} />
+          <SheetInput label="Address" value={address} onChange={setAddress} placeholder="Address" required={false} />
+          <div className="grid grid-cols-2 gap-3">
+            <SheetInput label="Locality" value={locality} onChange={setLocality} placeholder="Locality" required={false} />
+            <SheetInput label="City" value={city} onChange={setCity} placeholder="City" required={false} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <SheetInput label="State" value={state} onChange={setState} placeholder="State" required={false} />
+            <SheetInput label="Pincode" value={pincode} onChange={setPincode} placeholder="Pincode" required={false} />
+          </div>
+        </div>
+        {status && <p className="mt-3 text-xs font-black text-[#6655cf]">{status}</p>}
+        <button disabled={loading || !parentName.trim()} className="mt-5 w-full rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
+          {loading ? "Saving..." : "Save Parent Profile"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function EditKidSheet({ kid, onClose, onSaved }: { kid: AppKid; onClose: () => void; onSaved: () => void }) {
+  const [childName, setChildName] = useState(kid.childName);
+  const [dob, setDob] = useState(toDateInputValue(kid.dob));
+  const [school, setSchool] = useState(kid.school);
+  const [gender, setGender] = useState(kid.gender || "All");
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setStatus("");
+    try {
+      await postJson("/api/app/kids/update", { kidId: kid.id, childName, dob, school, gender });
+      await onSaved();
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to update kid profile.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="absolute inset-0 z-40 flex items-end bg-[#161332]/55 backdrop-blur-sm">
+      <button className="absolute inset-0 cursor-default" type="button" aria-label="Close edit child" onClick={onClose} />
+      <form onSubmit={submit} className="relative w-full rounded-t-[32px] bg-white px-5 pb-7 pt-3 shadow-2xl">
+        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-zinc-300" />
+        <button onClick={onClose} className="absolute right-5 top-5 text-[#8d89a6]" type="button" aria-label="Close"><X size={20} /></button>
+        <h2 className="text-xl font-black text-[#292444]">Edit Kid Profile</h2>
+        <p className="mt-2 text-sm font-bold text-[#8d89a6]">Keep details accurate so event eligibility is shown before payment.</p>
+        <div className="mt-5 grid gap-3">
+          <SheetInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="As per school records" />
+          <SheetInput label="Date of Birth" value={dob} onChange={setDob} placeholder="" type="date" />
+          <SheetInput label="School Name" value={school} onChange={setSchool} placeholder="School name" />
+          <label className="grid gap-1 text-[11px] font-black text-[#292444]">
+            Gender
+            <select value={gender} onChange={(event) => setGender(event.target.value)} className="h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]">
+              <option>All</option>
+              <option>Boy</option>
+              <option>Girl</option>
+            </select>
+          </label>
+        </div>
+        {status && <p className="mt-3 text-xs font-black text-[#6655cf]">{status}</p>}
+        <button disabled={loading || !childName.trim() || !dob || !school.trim()} className="mt-5 w-full rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
+          {loading ? "Saving..." : "Save Kid Profile"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function SheetInput({ label, value, onChange, placeholder, type = "text", required = true }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; type?: string; required?: boolean }) {
   return (
     <label className="grid gap-1 text-[11px] font-black text-[#292444]">
       {label}
-      <input required value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} className="h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]" />
+      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} className="h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]" />
     </label>
   );
 }
@@ -765,7 +913,7 @@ function WidgetPrompt({ onClose, onInstallApp, installWorking, installMessage }:
 function ReferBottomSheet({ data, onClose }: { data: AppData; onClose: () => void }) {
   const referCode = data.user.konnektKode || data.activeKid?.konnektKode || "KK-XXXXX";
   const name = data.user.parentName || "a parent";
-  const referText = `Hi! I'm ${name}, a proud Konnectly member. Join us and use my KonnektKode ${referCode} to earn bonus points: ${data.referralUrl}`;
+  const referText = `Hi! I'm ${name}, a proud Konnectly member. Join us and use my KonnektKode ${referCode}. Bonus points unlock after the first child profile is verified: ${data.referralUrl}`;
   const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(referText)}`;
 
   return (
@@ -775,7 +923,7 @@ function ReferBottomSheet({ data, onClose }: { data: AppData; onClose: () => voi
         <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-zinc-300" />
         <button onClick={onClose} className="absolute right-5 top-5 text-[#8d89a6]" type="button" aria-label="Close"><X size={20} /></button>
         <h2 className="text-xl font-black text-[#292444]">Refer & Earn Points!</h2>
-        <p className="mt-2 text-sm font-bold text-[#8d89a6]">Share with a fellow parent or child&apos;s family</p>
+        <p className="mt-2 text-sm font-bold text-[#8d89a6]">Share with a family. Points unlock after their first child profile is verified.</p>
         <div className="mt-5 rounded-[18px] border-2 border-[#e6b800] bg-[#fff8df] p-4 text-[#161332]">
           <p className="text-sm font-black">Hi! I&apos;m {name}, a proud Konnectly member.</p>
           <p className="mt-5 text-sm font-black leading-relaxed">Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more.</p>
@@ -940,6 +1088,33 @@ async function postJson(url: string, body: unknown) {
   return data;
 }
 
+function readCachedAppData() {
+  try {
+    if (typeof window === "undefined") return null;
+    const value = window.sessionStorage.getItem(APP_DATA_CACHE_KEY);
+    if (!value) return null;
+    return JSON.parse(value) as AppData;
+  } catch {
+    return null;
+  }
+}
+
+function cacheAppData(data: AppData) {
+  try {
+    window.sessionStorage.setItem(APP_DATA_CACHE_KEY, JSON.stringify(data));
+  } catch {
+    // Storage can be unavailable in private mode; fresh network data still works.
+  }
+}
+
+function clearCachedAppData() {
+  try {
+    window.sessionStorage.removeItem(APP_DATA_CACHE_KEY);
+  } catch {
+    // Ignore storage failures during auth redirects.
+  }
+}
+
 async function loadRazorpay() {
   if (window.Razorpay) return;
   await new Promise<void>((resolve, reject) => {
@@ -968,12 +1143,27 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { weekday: "short", month: "short", day: "2-digit", year: "numeric" }).format(date);
 }
 
+function toDateInputValue(value: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value.slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
 function startOfToday() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return today.getTime();
 }
 
+function getKidEventEligibility(kid: AppKid, event: AppEvent) {
+  if (kid.status !== "approved") return { eligible: false, reason: "Verification Pending" };
+  if (event.minAge && kid.age < event.minAge) return { eligible: false, reason: `Min age ${event.minAge}` };
+  if (event.maxAge && kid.age > event.maxAge) return { eligible: false, reason: `Max age ${event.maxAge}` };
+  return { eligible: true, reason: "" };
+}
+
 function isStandaloneApp() {
   return window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
+
