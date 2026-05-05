@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import type {
   AdminBrand,
   AdminData,
@@ -316,10 +318,10 @@ function PendingApprovalCard({
 
       {isOpen && (
         <div className="space-y-4 px-5 py-5">
-          <div className="grid gap-4 lg:grid-cols-[150px_1fr]">
-            <div className="grid min-h-32 place-items-center rounded-2xl border-2 border-[#ddd6fb] bg-[#f3efff] text-center text-xs font-black text-[#8f8ba6]">
-              <ShieldCheck size={38} className="text-[#604bd1]" />
-              <span>Verify profile details</span>
+          <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+            <div className="grid gap-3">
+              <AdminFilePreview title="Child Photo" source={profile.photo} fallback="No child photo uploaded" />
+              <AdminFilePreview title="School ID" source={profile.schoolIdPreview} fallback="No school ID preview" fileName={profile.schoolId} />
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -343,6 +345,42 @@ function PendingApprovalCard({
             </button>
             <span className="text-xs font-bold text-[#8f8ba6]">Approval sends WhatsApp and unlocks event booking.</span>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AdminFilePreview({ title, source, fallback, fileName }: { title: string; source: string; fallback: string; fileName?: string }) {
+  const [failedSource, setFailedSource] = useState("");
+  const hasSource = Boolean(source) && failedSource !== source;
+  const isPdf = source.startsWith("data:application/pdf") || /\.pdf($|\?)/i.test(source) || Boolean(fileName && /\.pdf$/i.test(fileName));
+
+  return (
+    <div className="overflow-hidden rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff]">
+      <div className="flex items-center justify-between gap-2 border-b border-[#e6e0fb] px-3 py-2">
+        <p className="text-xs font-black text-[#2d2856]">{title}</p>
+        {hasSource && (
+          <a href={source} target="_blank" rel="noreferrer" className="rounded-full bg-[#604bd1] px-3 py-1 text-[10px] font-black text-white">
+            Open
+          </a>
+        )}
+      </div>
+      {hasSource ? (
+        isPdf ? (
+          <div className="grid min-h-36 place-items-center p-3 text-center">
+            <object data={source} type="application/pdf" className="h-32 w-full rounded-xl bg-white" onError={() => setFailedSource(source)}>
+              <a href={source} target="_blank" rel="noreferrer" className="font-black text-[#604bd1]">Open PDF</a>
+            </object>
+            <p className="mt-2 max-w-full truncate text-[11px] font-black text-[#8f8ba6]">{fileName || "PDF document"}</p>
+          </div>
+        ) : (
+          <img src={source} alt={title} className="h-40 w-full object-cover" onError={() => setFailedSource(source)} />
+        )
+      ) : (
+        <div className="grid min-h-36 place-items-center px-4 py-5 text-center text-xs font-black text-[#8f8ba6]">
+          <ShieldCheck size={34} className="text-[#604bd1]" />
+          <span>{fallback}</span>
         </div>
       )}
     </div>

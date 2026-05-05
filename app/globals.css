@@ -24,3 +24,30 @@ body {
   color: var(--foreground);
   font-family: "Nunito", sans-serif;
 }
+
+:where(a, button, [role="button"], summary, select, label:has(input[type="checkbox"]), label:has(input[type="radio"])) {
+  cursor: pointer;
+}
+
+:where(a, button, [role="button"], summary) {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    background-color 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+:where(a, button, [role="button"], summary):where(:hover, :focus-visible):not(:disabled) {
+  transform: translateY(-1px);
+}
+
+:where(a, button, [role="button"], summary):active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+:where(button, select):disabled,
+:where([aria-disabled="true"]) {
+  cursor: not-allowed;
+}

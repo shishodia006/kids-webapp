@@ -36,6 +36,12 @@ export async function findUserByPhone(phone: string) {
   return queryOne<AnyRow>("SELECT * FROM users WHERE mobile = ? LIMIT 1", [phone]);
 }
 
+export async function findUserByEmail(email: string) {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  return queryOne<AnyRow>("SELECT * FROM users WHERE LOWER(email) = ? LIMIT 1", [normalized]);
+}
+
 export async function assertCanLogin(phone: string, password: unknown) {
   const rawPassword = typeof password === "string" ? password : "";
   const user = await findUserByPhone(phone);
@@ -68,6 +74,18 @@ export async function assertCanRegister(phone: string, referralCode: unknown) {
 
   const referrer = await findReferrerByCode(code);
   if (!referrer) return { ok: false as const, message: "Referral code not found. Please check it or leave it blank." };
+
+  return { ok: true as const };
+}
+
+export async function assertEmailAvailable(email: unknown) {
+  const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
+  if (!normalized) return { ok: true as const };
+
+  const existing = await findUserByEmail(normalized);
+  if (existing) {
+    return { ok: false as const, message: "This email is already registered. Please login or use another email." };
+  }
 
   return { ok: true as const };
 }
@@ -263,6 +281,7 @@ async function awardReferralBonus(referrerParentId: number, referredParentId: nu
   if (!kids.length) return;
 
   const points = 50;
+  await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referrerParentId]);
   const baseShare = Math.floor(points / kids.length);
   const remainder = points % kids.length;
 
@@ -270,6 +289,20 @@ async function awardReferralBonus(referrerParentId: number, referredParentId: nu
     const share = baseShare + (index < remainder ? 1 : 0);
     if (share > 0) {
       await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [share, Number(kid.id)]);
+    }
+  }
+
+  const referredKid = await queryOne<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC LIMIT 1", [referredParentId]);
+  if (referredKid?.id) {
+    await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referredParentId]);
+    await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [points, Number(referredKid.id)]);
+    try {
+      await executeQuery(
+        "INSERT INTO point_ledger (user_id, kid_id, source, points, description, ref_type, ref_id) VALUES (?, ?, 'referral_welcome_bonus', ?, ?, 'referral', ?)",
+        [referredParentId, Number(referredKid.id), points, "Welcome bonus for joining Konnectly through a referral.", referrerParentId],
+      );
+    } catch {
+      // Older DBs may not have point_ledger yet. The point balances are the important side effect.
     }
   }
 

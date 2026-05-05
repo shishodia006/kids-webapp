@@ -1,4 +1,4 @@
-import { assertCanRegister } from "@/lib/auth/accounts";
+import { assertCanRegister, assertEmailAvailable } from "@/lib/auth/accounts";
 import { createOtp, consumeOtpRateLimit, getClientRateKey, normalizeIndianPhone, OTP_TTL_SECONDS, sendOtpOnWhatsApp } from "@/lib/auth/otp";
 
 export async function POST(request: Request) {
@@ -19,6 +19,11 @@ export async function POST(request: Request) {
 
       if (!fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !cityArea) {
         return Response.json({ message: "Please enter your full name, valid email, and city/area." }, { status: 400 });
+      }
+
+      const emailGate = await assertEmailAvailable(email);
+      if (!emailGate.ok) {
+        return Response.json({ message: emailGate.message }, { status: 400 });
       }
     } else {
       return Response.json({ message: "Login now uses mobile number and password. Please login directly." }, { status: 410 });

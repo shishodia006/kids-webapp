@@ -1,18 +1,24 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element */
+
 import type { AppBooking, AppBrand, AppData, AppEvent, AppKid, AppNotification, AppRewardHistory } from "@/lib/app-data";
 import {
   ArrowLeft,
   BatteryFull,
   Bell,
   CalendarDays,
+  Camera,
+  Check,
   ChevronRight,
   Download,
   Gift,
   Grid2X2,
   History,
   Home,
+  LogOut,
   MapPin,
+  Paperclip,
   Plus,
   Printer,
   QrCode,
@@ -75,7 +81,7 @@ export default function UserApp() {
 
   useEffect(() => {
     function updateTime() {
-      const formatted = new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: false }).format(new Date());
+      const formatted = new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date()).toUpperCase();
       setCurrentTime(formatted);
     }
 
@@ -241,7 +247,7 @@ export default function UserApp() {
           {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onRedeem={redeem} onOpenActivities={() => setActiveNav("Activities")} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} />}
           {data && !selectedPass && activeNav === "Activities" && <ActivitiesScreen data={data} onBook={bookEvent} onOpenPass={setSelectedPass} />}
           {data && !selectedPass && activeNav === "Updates" && <UpdatesScreen notifications={data.notifications} />}
-          {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} onAddKid={() => setAddKidOpen(true)} onEditParent={() => setEditParentOpen(true)} onEditKid={setEditingKid} onOpenRefer={() => setReferOpen(true)} />}
+          {data && !selectedPass && activeNav === "Account" && <AccountScreen data={data} onSwitchKid={switchKid} onAddKid={() => setAddKidOpen(true)} onEditParent={() => setEditParentOpen(true)} onEditKid={setEditingKid} onOpenRefer={() => setReferOpen(true)} onOpenUpdates={() => setActiveNav("Updates")} onInstallApp={handleInstallApp} installWorking={installWorking} />}
         </div>
 
         <a
@@ -343,7 +349,7 @@ function HomeHeader({
       <div className="relative mt-3 flex items-center gap-2.5">
         {activeKid ? <KidAvatar kid={activeKid} size={56} large /> : <div className="grid h-14 w-14 place-items-center rounded-full border-[3px] border-[#ffe05a] bg-[#f6c400] text-lg font-black text-[#1c1740]">K</div>}
         <div>
-          <p className="text-xs font-black text-white/60">Good day</p>
+          <p className="text-xs font-black text-white/60">{getGreeting()}</p>
           <h1 className="text-lg font-black leading-tight">Hello, {activeKid?.childName || data?.user.parentName || "Parent"}!</h1>
           <p className="mt-1 text-[11px] font-black tracking-wide text-[#f6c400]">{data?.user.konnektKode || activeKid?.konnektKode || "KK-XXXXX"}</p>
         </div>
@@ -596,7 +602,7 @@ function UpdatesScreen({ notifications }: { notifications: AppNotification[] }) 
       {notifications.map((update) => (
         <div key={update.id} className="rounded-[18px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb]">
           <div className="flex items-center justify-between gap-3">
-            <span className={`rounded-full px-3 py-1 text-xs font-black uppercase tracking-[0.18em] ${update.type === "alert" ? "bg-red-100 text-red-700" : "bg-[#eee7ff] text-[#5f4bd2]"}`}>
+            <span className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] ${update.type === "alert" ? "bg-red-100 text-red-700" : "bg-[#eee7ff] text-[#5f4bd2]"}`}>
               {update.type === "alert" ? "Alert" : "Announcement"}
             </span>
             <span className="shrink-0 text-xs font-bold text-[#8d89a6]">{formatDate(update.createdAt)}</span>
@@ -608,53 +614,80 @@ function UpdatesScreen({ notifications }: { notifications: AppNotification[] }) 
   );
 }
 
-function AccountScreen({ data, onSwitchKid, onAddKid, onEditParent, onEditKid, onOpenRefer }: { data: AppData; onSwitchKid: (id: number) => void; onAddKid: () => void; onEditParent: () => void; onEditKid: (kid: AppKid) => void; onOpenRefer: () => void }) {
+function AccountScreen({
+  data,
+  onSwitchKid,
+  onAddKid,
+  onEditParent,
+  onEditKid,
+  onOpenRefer,
+  onOpenUpdates,
+  onInstallApp,
+  installWorking,
+}: {
+  data: AppData;
+  onSwitchKid: (id: number) => void;
+  onAddKid: () => void;
+  onEditParent: () => void;
+  onEditKid: (kid: AppKid) => void;
+  onOpenRefer: () => void;
+  onOpenUpdates: () => void;
+  onInstallApp: () => void;
+  installWorking: boolean;
+}) {
+  async function signOut() {
+    if (!window.confirm("Are you sure you want to sign out?")) return;
+    await fetch("/api/auth/logout", { method: "POST" });
+    clearCachedAppData();
+    window.location.href = "/login";
+  }
+
   return (
-    <div className="space-y-4 px-4 py-4">
-      <div className="rounded-[20px] bg-white p-5 text-center shadow-sm ring-1 ring-[#e9e4fb]">
-        <div className="mx-auto grid h-20 w-20 place-items-center rounded-full border-4 border-[#f6c400] bg-[#6754d6] text-3xl font-black text-white">{initials(data.user.parentName)}</div>
-        <h2 className="mt-4 text-lg font-black text-[#292444]">{data.user.parentName || data.user.fatherName || "Parent"}</h2>
-        <p className="mt-1.5 text-xs font-bold text-[#8d89a6]">{data.user.email || data.user.mobile}</p>
-        <div className="mt-4 grid grid-cols-2 gap-2.5">
-          <AccountTile icon={<Shield size={17} />} label="Account" value={data.user.locality || data.user.city || "Active"} tone="purple" />
-          <AccountTile icon={<Users size={17} />} label="Kids" value={`${data.kids.length} Profiles`} tone="purple" />
-          <AccountTile icon={<User size={17} />} label="Mobile" value={data.user.mobile} tone="gold" />
-          <AccountTile icon={<MapPin size={17} />} label="City" value={data.user.city || data.user.state || "-"} tone="gold" />
+    <div className="space-y-3 px-4 py-3.5">
+      <div className="rounded-[18px] bg-white p-4 text-center shadow-sm ring-1 ring-[#e9e4fb]">
+        <div className="mx-auto grid h-16 w-16 place-items-center rounded-full border-[3px] border-[#f6c400] bg-[#6754d6] text-2xl font-black text-white">{initials(data.user.parentName)}</div>
+        <h2 className="mt-3 text-base font-black text-[#292444]">{data.user.parentName || data.user.fatherName || "Parent"}</h2>
+        <p className="mt-1 text-[11px] font-bold text-[#8d89a6]">{data.user.email || data.user.mobile}</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <AccountTile icon={<Shield size={15} />} label="Account" value={data.user.locality || data.user.city || "Active"} tone="purple" />
+          <AccountTile icon={<Users size={15} />} label="Kids" value={`${data.kids.length} Profiles`} tone="purple" />
+          <AccountTile icon={<User size={15} />} label="Mobile" value={data.user.mobile} tone="gold" />
+          <AccountTile icon={<MapPin size={15} />} label="City" value={data.user.city || data.user.state || "-"} tone="gold" />
         </div>
-        <div className="mx-auto mt-4 w-fit rounded-full bg-[#5f4bd2] px-5 py-2 text-xs font-black tracking-[0.22em] text-[#f6c400]">{data.user.konnektKode || "KK-XXXXX"}</div>
-        <p className="mt-3 text-xs font-black text-[#8d89a6]">Your KonnektKode - share to refer families</p>
-        <div className="mt-4 grid grid-cols-2 gap-2.5">
-          <button onClick={onOpenRefer} className="rounded-full bg-[#f6c400] px-4 py-3 text-xs font-black text-[#292444]" type="button">
+        <div className="mx-auto mt-3 w-fit rounded-full bg-[#5f4bd2] px-4 py-1.5 text-[10px] font-black tracking-[0.2em] text-[#f6c400]">{data.user.konnektKode || "KK-XXXXX"}</div>
+        <p className="mt-2 text-[11px] font-black text-[#8d89a6]">Your KonnektKode - share to refer families</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button onClick={onOpenRefer} className="rounded-full bg-[#f6c400] px-3 py-2.5 text-[11px] font-black text-[#292444]" type="button">
             Refer & Earn
           </button>
-          <button onClick={onEditParent} className="rounded-full bg-[#eee7ff] px-4 py-3 text-xs font-black text-[#5f4bd2]" type="button">
+          <button onClick={onEditParent} className="rounded-full bg-[#eee7ff] px-3 py-2.5 text-[11px] font-black text-[#5f4bd2]" type="button">
             Edit Profile
           </button>
         </div>
       </div>
 
       <section>
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-base font-black text-[#292444]">Kids Profiles</h2>
-          <button onClick={onAddKid} disabled={data.kids.length >= 3} className="rounded-full bg-[#5f4bd2] px-3 py-1.5 text-xs font-black text-white disabled:opacity-45" type="button">Add Child</button>
+        <div className="mb-2.5 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-black text-[#292444]">Kids Profiles</h2>
+          <button onClick={onAddKid} disabled={data.kids.length >= 3} className="rounded-full bg-[#5f4bd2] px-3 py-1.5 text-[11px] font-black text-white disabled:opacity-45" type="button">Add Child</button>
         </div>
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {data.kids.length === 0 && <EmptyState text="No kid profiles found for this account." />}
           {data.kids.map((kid) => (
-            <div key={kid.id} className={`flex w-full items-center gap-3 rounded-[20px] bg-white p-4 text-left shadow-sm ring-1 transition ${data.activeKid?.id === kid.id ? "ring-2 ring-[#e6b800]" : "ring-[#e9e4fb]"}`}>
-              <button onClick={() => onSwitchKid(kid.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left transition active:scale-[0.99]" type="button">
-                <KidAvatar kid={kid} size={48} />
+            <div key={kid.id} className={`flex w-full items-center gap-2.5 rounded-[18px] bg-white p-3 text-left shadow-sm ring-1 transition ${data.activeKid?.id === kid.id ? "ring-2 ring-[#e6b800]" : "ring-[#e9e4fb]"}`}>
+              <button onClick={() => onSwitchKid(kid.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition active:scale-[0.99]" type="button">
+                <KidAvatar kid={kid} size={42} />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-base font-black text-[#292444]">
+                  <span className="block text-sm font-black text-[#292444]">
                     {kid.childName}
-                    {data.activeKid?.id === kid.id && <span className="ml-2 text-xs font-black uppercase tracking-[0.14em] text-[#c99000]">· Active</span>}
+                    {data.activeKid?.id === kid.id && <span className="ml-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#c99000]">· Active</span>}
                   </span>
-                  <span className="mt-1 block text-xs font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
+                  <span className="mt-0.5 block text-[11px] font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
                 </span>
               </button>
-              <div className="grid shrink-0 justify-items-end gap-2">
-                <span className={`rounded-full px-3 py-1 text-xs font-black ${kid.status === "approved" ? "bg-green-100 text-green-700" : "bg-[#fff8df] text-[#c99000]"}`}>{kid.status === "approved" ? "Verified" : "Verification Pending"}</span>
-                <button onClick={() => onEditKid(kid)} className="rounded-full bg-[#eee7ff] px-3 py-1.5 text-xs font-black text-[#5f4bd2]" type="button">
+              <div className="grid shrink-0 justify-items-end gap-1.5">
+                <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${kid.status === "approved" ? "bg-green-100 text-green-700" : "bg-[#fff8df] text-[#c99000]"}`}>{kid.status === "approved" ? "Verified" : "Pending"}</span>
+                <button onClick={() => onEditKid(kid)} className="rounded-full bg-[#eee7ff] px-2.5 py-1 text-[11px] font-black text-[#5f4bd2]" type="button">
                   Edit
                 </button>
               </div>
@@ -663,19 +696,68 @@ function AccountScreen({ data, onSwitchKid, onAddKid, onEditParent, onEditKid, o
         </div>
       </section>
       <RewardsHistory history={data.rewardHistory} />
-      <button
-        onClick={async () => {
-          if (!window.confirm("Are you sure you want to sign out?")) return;
-          await fetch("/api/auth/logout", { method: "POST" });
-          clearCachedAppData();
-          window.location.href = "/login";
-        }}
-        className="w-full rounded-full bg-[#1b1b1b] px-5 py-3 text-sm font-black text-[#ffc52e]"
-        type="button"
-      >
-        Sign Out
-      </button>
+      <div className="space-y-2.5">
+        <AccountActionCard
+          icon={<Download size={19} />}
+          title={installWorking ? "Checking Install..." : "Install Konnectly App"}
+          body="Add to home screen for quick access"
+          tone="gold"
+          onClick={onInstallApp}
+          disabled={installWorking}
+        />
+        <AccountActionCard icon={<Plus size={20} />} title="Add Another Child" tone="purple" onClick={onAddKid} disabled={data.kids.length >= 3} />
+        <AccountActionCard icon={<Bell size={19} />} title="Updates & Alerts" tone="amber" onClick={onOpenUpdates} />
+        <AccountActionCard icon={<Gift size={19} />} title="Refer a Family & Earn" tone="green" onClick={onOpenRefer} />
+        <AccountActionCard icon={<LogOut size={19} />} title="Sign Out" tone="red" onClick={signOut} />
+      </div>
     </div>
+  );
+}
+
+function AccountActionCard({
+  icon,
+  title,
+  body,
+  tone,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode;
+  title: string;
+  body?: string;
+  tone: "gold" | "purple" | "amber" | "green" | "red";
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  const toneStyles = {
+    gold: "border-[#e6b800] bg-[#fff6d8] text-[#c99000]",
+    purple: "border-[#e9e4fb] bg-white text-[#5f4bd2]",
+    amber: "border-[#e9e4fb] bg-white text-[#d49b00]",
+    green: "border-[#e9e4fb] bg-white text-[#20c767]",
+    red: "border-[#e9e4fb] bg-white text-[#ef4444]",
+  };
+  const iconStyles = {
+    gold: "bg-white text-[#d49b00]",
+    purple: "bg-[#eee7ff] text-[#5f4bd2]",
+    amber: "bg-[#fff8df] text-[#d49b00]",
+    green: "bg-[#dcfce7] text-[#16bf62]",
+    red: "bg-red-50 text-[#ef4444]",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex w-full items-center gap-3 rounded-[18px] border-2 px-4 py-3 text-left shadow-sm disabled:cursor-not-allowed disabled:opacity-45 ${toneStyles[tone]}`}
+      type="button"
+    >
+      <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${iconStyles[tone]}`}>{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-black ">{title}</span>
+        {body && <span className="mt-0.5 block text-xs font-bold text-[#8d89a6]">{body}</span>}
+      </span>
+      <ChevronRight size={17} className={tone === "gold" ? "text-[#d49b00]" : "text-[#c4c0d4]"} />
+    </button>
   );
 }
 
@@ -687,17 +769,17 @@ function RewardsHistory({ history }: { history: AppRewardHistory[] }) {
 
   return (
     <section>
-      <h2 className="mb-3 text-base font-black text-[#292444]">Rewards History</h2>
-      <div className="space-y-3">
+      <h2 className="mb-2.5 text-sm font-black text-[#292444]">Rewards History</h2>
+      <div className="space-y-2.5">
         {history.length === 0 && <EmptyState text="No vouchers or redemptions yet." />}
         {Object.entries(grouped).map(([month, entries]) => (
-          <div key={month} className="rounded-[20px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb]">
-            <h3 className="text-sm font-black text-[#292444]">{month}</h3>
+          <div key={month} className="rounded-[18px] bg-white p-3.5 shadow-sm ring-1 ring-[#e9e4fb]">
+            <h3 className="text-xs font-black text-[#292444]">{month}</h3>
             <div className="mt-3 space-y-2">
               {entries.map((entry) => (
-                <div key={entry.id} className="rounded-2xl bg-[#f7f5ff] p-3">
-                  <p className="text-sm font-black text-[#292444]">{entry.brandName}</p>
-                  <p className="mt-1 text-xs font-bold text-[#8d89a6]">{entry.pointsSpent} pts | {entry.voucherCode} | {entry.status}</p>
+                <div key={entry.id} className="rounded-[14px] bg-[#f7f5ff] p-2.5">
+                  <p className="text-xs font-black text-[#292444]">{entry.brandName}</p>
+                  <p className="mt-1 text-[11px] font-bold text-[#8d89a6]">{entry.pointsSpent} pts | {entry.voucherCode} | {entry.status}</p>
                 </div>
               ))}
             </div>
@@ -710,19 +792,28 @@ function RewardsHistory({ history }: { history: AppRewardHistory[] }) {
 
 function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [childName, setChildName] = useState("");
+  const [ageInput, setAgeInput] = useState("");
   const [dob, setDob] = useState("");
   const [school, setSchool] = useState("");
+  const [photo, setPhoto] = useState("");
+  const [photoData, setPhotoData] = useState("");
   const [schoolIdCard, setSchoolIdCard] = useState("");
   const [schoolIdCardData, setSchoolIdCardData] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const age = Number(ageInput);
+  const ageInvalid = Boolean(ageInput) && (!Number.isFinite(age) || age < 0 || age > 18);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (ageInvalid) {
+      setStatus("Child age cannot be more than 18 years.");
+      return;
+    }
     setLoading(true);
     setStatus("");
     try {
-      await postJson("/api/app/kids", { childName, dob, school, schoolIdCard, schoolIdCardData });
+      await postJson("/api/app/kids", { childName, dob, school, photo, photoData, schoolIdCard, schoolIdCardData });
       await onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to add child profile.");
@@ -731,39 +822,150 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     }
   }
 
+  function updateDob(value: string) {
+    setDob(value);
+    const nextAge = getAgeFromDob(value);
+    setAgeInput(nextAge ? String(nextAge) : "");
+  }
+
+  function updateAge(value: string) {
+    const nextValue = value.replace(/\D/g, "").slice(0, 2);
+    setAgeInput(nextValue);
+    if (Number(nextValue) > 18) setStatus("Child age cannot be more than 18 years.");
+    else if (status === "Child age cannot be more than 18 years.") setStatus("");
+  }
+
+  function uploadFile(file: File | undefined, type: "photo" | "schoolId") {
+    setStatus("");
+    if (!file) {
+      if (type === "photo") {
+        setPhoto("");
+        setPhotoData("");
+      } else {
+        setSchoolIdCard("");
+        setSchoolIdCardData("");
+      }
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setStatus("File size should be 5MB or less.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = typeof reader.result === "string" ? reader.result : "";
+      if (type === "photo") {
+        setPhoto(file.name);
+        setPhotoData(value);
+      } else {
+        setSchoolIdCard(file.name);
+        setSchoolIdCardData(value);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
-    <div className="absolute inset-0 z-40 flex items-end bg-[#161332]/55 backdrop-blur-sm">
-      <button className="absolute inset-0 cursor-default" type="button" aria-label="Close add child" onClick={onClose} />
-      <form onSubmit={submit} className="relative w-full rounded-t-[32px] bg-white px-5 pb-7 pt-3 shadow-2xl">
-        <div className="mx-auto mb-5 h-1 w-12 rounded-full bg-zinc-300" />
-        <button onClick={onClose} className="absolute right-5 top-5 text-[#8d89a6]" type="button" aria-label="Close"><X size={20} /></button>
-        <h2 className="text-xl font-black text-[#292444]">Add Child Profile</h2>
-        <p className="mt-2 text-sm font-bold text-[#8d89a6]">Profiles are reviewed before event registration is enabled.</p>
-        <div className="mt-5 grid gap-3">
-          <SheetInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="As per school records" />
-          <SheetInput label="Date of Birth" value={dob} onChange={setDob} placeholder="" type="date" />
-          <SheetInput label="School Name" value={school} onChange={setSchool} placeholder="School name" />
-          <label className="grid gap-1 text-[11px] font-black text-[#292444]">
-            School ID Card Photo
-            <input required type="file" accept="image/png,image/jpeg" onChange={(event) => {
-              const file = event.target.files?.[0];
-              setSchoolIdCard(file?.name || "");
-              if (!file) {
-                setSchoolIdCardData("");
-                return;
-              }
-              const reader = new FileReader();
-              reader.onload = () => setSchoolIdCardData(typeof reader.result === "string" ? reader.result : "");
-              reader.readAsDataURL(file);
-            }} className="rounded-2xl border-2 border-[#e3e0f4] bg-white px-3 py-3 text-xs font-bold" />
-          </label>
+    <div className="absolute bottom-[72px] left-0 right-0 top-0 z-[15] flex flex-col overflow-hidden bg-[#f7f5ff]">
+      <div className="relative shrink-0 overflow-hidden bg-[#4d39b6] px-5 pb-7 pt-2.5 text-white">
+        <div className="absolute -right-12 top-0 h-36 w-36 rounded-full bg-white/14" />
+        <StatusBar currentTime={new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date()).toUpperCase()} />
+        <div className="relative mt-5 flex items-center gap-4">
+          <button onClick={onClose} className="grid h-12 w-12 place-items-center rounded-full border border-white/20 bg-white/12 text-[#f6c400]" type="button" aria-label="Back to account">
+            <ArrowLeft size={24} />
+          </button>
+          <div>
+            <h2 className="text-xl font-black leading-tight">Add Kid Profile</h2>
+            <p className="mt-1.5 text-xs font-black text-white/55">Tell us about your child</p>
+          </div>
         </div>
-        {status && <p className="mt-3 text-xs font-black text-[#6655cf]">{status}</p>}
-        <button disabled={loading || !childName || !dob || !school || !schoolIdCard} className="mt-5 w-full rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
-          {loading ? "Submitting..." : "Submit for Verification"}
-        </button>
+      </div>
+
+      <form onSubmit={submit} className="min-h-0 flex-1 overflow-y-auto px-5 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex min-h-full flex-col rounded-[26px] bg-white p-4 shadow-sm ring-2 ring-[#e8e2fb]">
+          <label className="mx-auto grid w-fit place-items-center">
+            <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(event) => { event.currentTarget.blur(); uploadFile(event.target.files?.[0], "photo"); }} />
+            <span className="relative grid h-24 w-24 place-items-center overflow-visible rounded-full border-2 border-dashed border-[#bdb2f4] bg-[#f3f0ff] text-[#5f4bd2]">
+              {photoData ? <img src={photoData} alt="" className="h-full w-full object-cover" /> : <Camera size={34} />}
+              <span className="absolute -bottom-1 -right-1 grid h-8 w-8 place-items-center rounded-xl border-2 border-white bg-[#f6c400] text-[#292444] shadow-lg">
+                <Camera size={16} strokeWidth={2.6} />
+              </span>
+            </span>
+            <span className="mt-2 text-xs font-black text-[#8d89a6]">{photo ? "Photo selected" : "Upload child photo"}</span>
+          </label>
+
+          <div className="mt-5 grid gap-3.5">
+            <KidFormInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="e.g. Aarav Sharma" />
+            <div className="grid grid-cols-2 gap-3">
+              <KidFormInput label="Age" value={ageInput} onChange={updateAge} placeholder="Age" type="number" min="0" max="18" />
+              <KidFormInput label="Date of Birth" value={dob} onChange={updateDob} placeholder="" type="date" min={dateYearsAgo(18)} max={todayDateInput()} />
+            </div>
+            {ageInvalid && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Age cannot be more than 18 years.</p>}
+            <KidFormInput label="School Name" value={school} onChange={setSchool} placeholder="e.g. DPS R.K. Puram" />
+
+            <label className="grid min-h-32 place-items-center rounded-[22px] border-2 border-dashed border-[#bdb2f4] bg-[#f7f5ff] px-4 py-5 text-center">
+              <input type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(event) => { event.currentTarget.blur(); uploadFile(event.target.files?.[0], "schoolId"); }} />
+              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-[#5f4bd2] shadow-sm">
+                <Paperclip size={21} />
+              </span>
+              <span className="mt-3 text-sm font-black text-[#5f4bd2]">{schoolIdCard ? schoolIdCard : "Tap to upload School ID"}</span>
+              <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF, JPG or PNG - Max 5MB</span>
+            </label>
+          </div>
+
+          <div className="mt-auto pt-5">
+            {status && <p className="mb-4 rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black leading-5 text-[#6655cf]">{status}</p>}
+            <button disabled={loading || !childName.trim() || !ageInput || !dob || ageInvalid || !school.trim() || !photo || !schoolIdCard} className="flex w-full items-center justify-center gap-2 rounded-full bg-[#6754d6] px-5 py-3.5 text-sm font-black text-white shadow-[0_16px_28px_rgba(103,84,214,0.25)] disabled:opacity-50" type="submit">
+              <Check size={18} /> {loading ? "Saving..." : "Submit for Verification"}
+            </button>
+          </div>
+        </div>
       </form>
     </div>
+  );
+}
+
+function KidFormInput({
+  label,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  readOnly,
+  min,
+  max,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  type?: string;
+  readOnly?: boolean;
+  min?: string;
+  max?: string;
+}) {
+  return (
+    <label className="grid gap-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#292444]">
+      {label}
+      <input
+        required={!readOnly}
+        readOnly={readOnly}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        onClick={(event) => {
+          if (type !== "date") return;
+          const input = event.currentTarget as HTMLInputElement & { showPicker?: () => void };
+          input.showPicker?.();
+        }}
+        placeholder={placeholder}
+        type={type}
+        min={min}
+        max={max}
+        className="h-13 rounded-[16px] border-2 border-[#ddd8f5] bg-[#f7f5ff] px-4 text-sm font-black normal-case tracking-normal text-[#292444] outline-none transition placeholder:text-sm placeholder:font-black placeholder:text-[#8d89a6] focus:border-[#6655cf] read-only:text-[#8d89a6]"
+      />
+    </label>
   );
 }
 
@@ -899,8 +1101,8 @@ function WidgetPrompt({ onClose, onInstallApp, installWorking, installMessage }:
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#25d366] text-white"><Download size={28} /></div>
         <h2 className="mt-5 text-2xl font-black leading-tight text-[#292444]">Never miss an event — add Konnectly to your home screen!</h2>
         <div className="mt-5 grid gap-3 text-left">
-          <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>iOS:</b> Tap Share in Safari, choose Add to Home Screen, then tap Add.</div>
-          <div className="rounded-2xl bg-[#f7f5ff] p-3 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open browser menu, choose Install app or Add to Home screen, then confirm.</div>
+          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>iOS:</b> Tap Share in Safari, choose Add to Home Screen, then tap Add.</div>
+          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open browser menu, choose Install app or Add to Home screen, then confirm.</div>
         </div>
         {installMessage && <p className="mt-4 rounded-2xl bg-[#fff8df] p-3 text-xs font-black leading-5 text-[#8a6500]">{installMessage}</p>}
         <button disabled={installWorking} onClick={async () => { if (await onInstallApp(false)) onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white transition active:scale-[0.98] disabled:opacity-65" type="button">{installWorking ? "Checking..." : "Add to Home Screen"}</button>
@@ -1006,6 +1208,7 @@ function LogoBox({ compact }: { compact?: boolean }) {
 
 function KidAvatar({ kid, size, large }: { kid: AppKid; size: number; large?: boolean }) {
   const className = `${large ? "border-[3px] border-[#ffe05a]" : ""} rounded-full object-cover`;
+  if (kid.photo?.startsWith("data:")) return <img src={kid.photo} alt="" className={className} style={{ width: size, height: size }} />;
   if (kid.photo) return <Image src={kid.photo} alt="" width={size} height={size} className={className} style={{ width: size, height: size }} />;
   return (
     <span className={`grid shrink-0 place-items-center rounded-full bg-[#f6c400] font-black text-[#1c1740] ${large ? "border-[3px] border-[#ffe05a] text-lg" : "text-xs"}`} style={{ width: size, height: size }}>
@@ -1029,7 +1232,7 @@ function ActionCard({ tone, icon, title, body, onClick, busy }: { tone: "gold" |
       <span className={`grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white transition ${busy ? "animate-pulse" : ""} ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`}>{icon}</span>
       <span className="min-w-0 flex-1">
         <span className={`block text-sm font-black ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`}>{title}</span>
-        <span className="mt-1 block text-xs font-bold text-[#8d89a6]">{body}</span>
+        <span className="mt-0.5 block text-[11px] font-bold text-[#8d89a6]">{body}</span>
       </span>
       <ChevronRight className={`shrink-0 transition ${busy ? "translate-x-1" : ""} ${isGold ? "text-[#c99000]" : "text-[#5f4bd2]"}`} />
     </button>
@@ -1038,9 +1241,9 @@ function ActionCard({ tone, icon, title, body, onClick, busy }: { tone: "gold" |
 
 function AccountTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string; tone: "purple" | "gold" }) {
   return (
-    <div className={`rounded-2xl border p-3 ${tone === "purple" ? "border-[#eee7ff] bg-[#eee7ff]" : "border-[#efd071] bg-[#fff8df]"}`}>
-      <p className={`flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-[0.12em] ${tone === "purple" ? "text-[#5f4bd2]" : "text-[#c99000]"}`}>{icon} {label}</p>
-      <p className="mt-2 truncate text-sm font-black text-[#292444]">{value || "-"}</p>
+    <div className={`rounded-[14px] border p-2.5 ${tone === "purple" ? "border-[#eee7ff] bg-[#eee7ff]" : "border-[#efd071] bg-[#fff8df]"}`}>
+      <p className={`flex items-center justify-center gap-1.5 text-[10px] font-black uppercase tracking-[0.1em] ${tone === "purple" ? "text-[#5f4bd2]" : "text-[#c99000]"}`}>{icon} {label}</p>
+      <p className="mt-1.5 truncate text-xs font-black text-[#292444]">{value || "-"}</p>
     </div>
   );
 }
@@ -1150,6 +1353,36 @@ function toDateInputValue(value: string) {
   return date.toISOString().slice(0, 10);
 }
 
+function getAgeFromDob(value: string) {
+  if (!value) return 0;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 0;
+  const today = new Date();
+  let age = today.getFullYear() - date.getFullYear();
+  const monthDelta = today.getMonth() - date.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < date.getDate())) age -= 1;
+  return Math.max(0, age);
+}
+
+function todayDateInput() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function dateYearsAgo(years: number) {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - years);
+  return date.toISOString().slice(0, 10);
+}
+
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Good night";
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  if (hour < 21) return "Good evening";
+  return "Good night";
+}
+
 function startOfToday() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -1166,4 +1399,3 @@ function getKidEventEligibility(kid: AppKid, event: AppEvent) {
 function isStandaloneApp() {
   return window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
 }
-

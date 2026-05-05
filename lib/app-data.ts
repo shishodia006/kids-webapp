@@ -198,30 +198,33 @@ export async function addChildProfile(input: Record<string, unknown>) {
   const school = clean(input.school);
   const schoolIdCard = clean(input.schoolIdCard);
   const schoolIdCardData = clean(input.schoolIdCardData);
+  const photo = clean(input.photo);
+  const photoData = clean(input.photoData);
   const gender = clean(input.gender) || "All";
 
-  if (!childName || !dob || !school || (!schoolIdCard && !schoolIdCardData)) {
-    throw new Error("Child name, date of birth, school name, and school ID card photo are required.");
+  if (!childName || !dob || !school || (!photo && !photoData) || (!schoolIdCard && !schoolIdCardData)) {
+    throw new Error("Child name, date of birth, school name, child photo, and school ID document are required.");
   }
 
   const birthDate = new Date(dob);
   if (Number.isNaN(birthDate.getTime())) throw new Error("Please enter a valid date of birth.");
 
   const age = calculateAge(birthDate);
+  if (age > 18) throw new Error("Child age cannot be more than 18 years.");
 
   const inserted = await queryOne<{ id: number }>(
     `
     INSERT INTO kids
-      (parent_id, child_name, age, dob, school, school_id_card, block_rank, status, konnekt_points)
+      (parent_id, child_name, age, dob, school, school_id_card, photo, block_rank, status, konnekt_points)
     VALUES
-      (?, ?, ?, ?, ?, ?, 'Newbie', 'pending', 0)
+      (?, ?, ?, ?, ?, ?, ?, 'Newbie', 'pending', 0)
     RETURNING id
     `,
-    [user.id, childName, age, birthDate, school, schoolIdCard],
+    [user.id, childName, age, birthDate, school, schoolIdCard, photo],
   );
   const kidId = Number(inserted?.id);
   if (kidId) {
-    await executeQuery("UPDATE kids SET school_id_card_data = ?, gender = ? WHERE id = ?", [schoolIdCardData || null, gender, kidId]);
+    await executeQuery("UPDATE kids SET school_id_card_data = ?, photo_data = ?, gender = ? WHERE id = ?", [schoolIdCardData || null, photoData || null, gender, kidId]);
   }
 
   await sendWhatsAppText(
@@ -482,7 +485,7 @@ function mapKid(row: KidRow): AppKid {
     age: num(row.age),
     school: str(row.school),
     dob: dateStr(row.dob),
-    photo: publicPath(str(row.photo)),
+    photo: str(row.photo_data) || publicPath(str(row.photo)),
     schoolIdCard: str(row.school_id_card_data) || publicPath(str(row.school_id_card)),
     status: str(row.status) || "pending",
     gender: str(row.gender) || "All",
@@ -587,6 +590,7 @@ function dateStr(value: unknown) {
 
 function publicPath(path: string) {
   if (!path) return "";
+  if (path.startsWith("data:")) return path;
   if (/^https?:\/\//i.test(path) || path.startsWith("/")) return path;
   return `/${path.replace(/^\.?\//, "")}`;
 }
@@ -613,6 +617,7 @@ function calculateAge(date: Date) {
 
 async function ensureProductSchema() {
   await executeQuery("ALTER TABLE users ADD COLUMN IF NOT EXISTS konnect_points INTEGER NOT NULL DEFAULT 0");
+  await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS photo_data TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS school_id_card_data TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS min_age INTEGER");

@@ -1,4 +1,4 @@
-import { createParentAccount, type ParentSignupDetails } from "@/lib/auth/accounts";
+import { assertEmailAvailable, createParentAccount, type ParentSignupDetails } from "@/lib/auth/accounts";
 import { markOtpUsed, normalizeIndianPhone, verifyOtp } from "@/lib/auth/otp";
 import { createSessionToken, getSessionCookieOptions, SESSION_COOKIE_NAME } from "@/lib/auth/session";
 import { NextResponse } from "next/server";
@@ -20,6 +20,11 @@ export async function POST(request: Request) {
     const registration = normalizeParentSignup(body.registration, phone);
     if (!registration.ok) {
       return Response.json({ message: registration.message }, { status: 400 });
+    }
+
+    const emailGate = await assertEmailAvailable(registration.details.email);
+    if (!emailGate.ok) {
+      return Response.json({ message: emailGate.message }, { status: 400 });
     }
 
     const result = verifyOtp({ requestId: body.requestId, phone, purpose: "register", code });
@@ -46,10 +51,23 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("COMPLETE_REGISTRATION_ERROR:", error);
     return Response.json(
-      { message: error instanceof Error ? error.message : "Unable to create your account right now." },
-      { status: 500 },
+      { message: getCreateAccountMessage(error) },
+      { status: isDuplicateAccountError(error) ? 400 : 500 },
     );
   }
+}
+
+function getCreateAccountMessage(error: unknown) {
+  if (isDuplicateAccountError(error)) {
+    return "This email or mobile number is already registered. Please login or use different details.";
+  }
+
+  return error instanceof Error ? error.message : "Unable to create your account right now.";
+}
+
+function isDuplicateAccountError(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  return text.includes("23505") || text.includes("duplicate key value") || text.includes("users_email_key") || text.includes("users_mobile_key");
 }
 
 function normalizeParentSignup(value: unknown, phone: string) {

@@ -51,6 +51,8 @@ export type AdminKid = {
   dob: string;
   school: string;
   schoolId: string;
+  photo: string;
+  schoolIdPreview: string;
   parent: string;
   phone: string;
   locality: string;
@@ -312,6 +314,27 @@ export async function updateKidStatus(kidId: number, status: "approved" | "rejec
   }
 }
 
+export async function getAdminKidFile(kidId: number, type: "photo" | "schoolId") {
+  await requireAdmin();
+  await ensureAdminProductSchema();
+  if (!kidId) throw new Error("File not found.");
+
+  const row = await queryOne<AnyRow>(
+    "SELECT photo, photo_data, school_id_card, school_id_card_data FROM kids WHERE id = ? LIMIT 1",
+    [kidId],
+  );
+  if (!row) throw new Error("File not found.");
+
+  const dataUrl = type === "photo" ? str(row.photo_data) : str(row.school_id_card_data);
+  const fileName = type === "photo" ? str(row.photo) || "child-photo" : str(row.school_id_card) || "school-id";
+  if (dataUrl) return dataUrlToFile(dataUrl, fileName);
+
+  const storedPath = type === "photo" ? previewablePublicPath(str(row.photo)) : previewablePublicPath(str(row.school_id_card));
+  if (storedPath) return { redirectTo: storedPath };
+
+  throw new Error("File preview is not available.");
+}
+
 async function awardReferralOnApproval(kidId: number) {
   const approvedKid = await queryOne<AnyRow>(
     `SELECT k.parent_id, u.parent_name, u.block_sector AS referral_code
@@ -341,13 +364,20 @@ async function awardReferralOnApproval(kidId: number) {
     [referrer.parentId, points, `${str(approvedKid?.parent_name) || "A parent"} joined Konnectly using your referral.`, referredParentId],
   );
 
-  const referredKids = await queryRows<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC", [referredParentId]);
-  const baseShare = referredKids.length ? Math.floor(points / referredKids.length) : 0;
-  const remainder = referredKids.length ? points % referredKids.length : 0;
-  for (const [index, kid] of referredKids.entries()) {
+  const referrerKids = await queryRows<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC", [referrer.parentId]);
+  const baseShare = referrerKids.length ? Math.floor(points / referrerKids.length) : 0;
+  const remainder = referrerKids.length ? points % referrerKids.length : 0;
+  for (const [index, kid] of referrerKids.entries()) {
     const share = baseShare + (index < remainder ? 1 : 0);
     if (share > 0) await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [share, num(kid.id)]);
   }
+
+  await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referredParentId]);
+  await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [points, kidId]);
+  await executeQuery(
+    "INSERT INTO point_ledger (user_id, kid_id, source, points, description, ref_type, ref_id) VALUES (?, ?, 'referral_welcome_bonus', ?, ?, 'referral', ?)",
+    [referredParentId, kidId, points, "Welcome bonus for joining Konnectly through a referral.", referrer.parentId],
+  );
 
   await executeQuery(
     "INSERT INTO referral_rewards (referrer_parent_id, referred_parent_id, referral_code, points_awarded) VALUES (?, ?, ?, ?)",
@@ -357,6 +387,8 @@ async function awardReferralOnApproval(kidId: number) {
 
 async function ensureAdminProductSchema() {
   await executeQuery("ALTER TABLE users ADD COLUMN IF NOT EXISTS konnect_points INTEGER NOT NULL DEFAULT 0");
+  await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS photo_data TEXT");
+  await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS school_id_card_data TEXT");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS min_age INTEGER");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS max_age INTEGER");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
@@ -470,8 +502,12 @@ function mapMember(row: AnyRow): AdminMember {
 }
 
 function mapPendingKid(row: AnyRow): AdminKid {
+  const id = num(row.id);
+  const photoData = str(row.photo_data);
+  const schoolIdData = str(row.school_id_card_data);
+
   return {
-    id: num(row.id),
+    id,
     initials: initials(str(row.child_name)),
     name: str(row.child_name) || "Child",
     age: `${num(row.age)} years`,
@@ -479,6 +515,8 @@ function mapPendingKid(row: AnyRow): AdminKid {
     dob: row.dob ? formatDate(row.dob) : "-",
     school: str(row.school) || "-",
     schoolId: str(row.school_id_card) || "-",
+    photo: photoData ? adminKidFileUrl(id, "photo") : previewablePublicPath(str(row.photo)),
+    schoolIdPreview: schoolIdData ? adminKidFileUrl(id, "schoolId") : previewablePublicPath(str(row.school_id_card)),
     parent: str(row.parent_name) || [str(row.father_name), str(row.mother_name)].filter(Boolean).join(" & ") || "Parent",
     phone: formatPhone(str(row.mobile)),
     locality: str(row.locality) || str(row.city) || "-",
@@ -562,6 +600,59 @@ function num(value: unknown) {
 
 function initials(value: string) {
   return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "K";
+}
+
+function publicPath(path: string) {
+  if (!path) return "";
+  if (path.startsWith("data:")) return path;
+  if (/^https?:\/\//i.test(path) || path.startsWith("/")) return path;
+  return `/${path.replace(/^\.?\//, "")}`;
+}
+
+function previewablePublicPath(path: string) {
+  const value = path.trim().replace(/\\/g, "/");
+  if (!value) return "";
+  if (value.startsWith("data:") || /^https?:\/\//i.test(value) || value.startsWith("/") || value.includes("/")) return publicPath(value);
+  return "";
+}
+
+function adminKidFileUrl(kidId: number, type: "photo" | "schoolId") {
+  return `/api/admin/kids/file?kidId=${kidId}&type=${type}`;
+}
+
+function dataUrlToFile(dataUrl: string, fallbackName: string) {
+  const match = dataUrl.match(/^data:([^;,]+)?((?:;[^,]*)?),(.*)$/);
+  if (!match) throw new Error("File preview is not available.");
+
+  const contentType = match[1] || contentTypeFromName(fallbackName);
+  const meta = match[2] || "";
+  const payload = match[3] || "";
+  const bytes = meta.includes(";base64")
+    ? Buffer.from(payload, "base64")
+    : Buffer.from(decodeURIComponent(payload));
+
+  return {
+    bytes,
+    contentType,
+    fileName: fallbackName || `kid-file.${extensionFromContentType(contentType)}`,
+  };
+}
+
+function contentTypeFromName(fileName: string) {
+  const lower = fileName.toLowerCase();
+  if (lower.endsWith(".pdf")) return "application/pdf";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  return "application/octet-stream";
+}
+
+function extensionFromContentType(contentType: string) {
+  if (contentType === "application/pdf") return "pdf";
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType === "image/jpeg") return "jpg";
+  return "bin";
 }
 
 function formatPhone(phone: string) {
