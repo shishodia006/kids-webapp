@@ -40,6 +40,7 @@ declare global {
   interface Window {
     Razorpay?: new (options: Record<string, unknown>) => { open: () => void };
     konnectlyInstallApp?: () => Promise<boolean>;
+    konnectlyIsAppInstalled?: () => boolean;
   }
 }
 
@@ -51,6 +52,7 @@ const navItems: Array<{ label: NavLabel; icon: typeof Home }> = [
 ];
 
 const APP_DATA_CACHE_KEY = "konnectly_app_data_v1";
+const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app already installed hai. Home screen se open kijiye ya browser ke Open in app button par tap kijiye.";
 
 export default function UserApp() {
   const [data, setData] = useState<AppData | null>(null);
@@ -148,16 +150,16 @@ export default function UserApp() {
     setInstallWorking(true);
 
     try {
-      if (isStandaloneApp()) {
-        const message = "Konnectly is already installed. Tap the browser's Open in app button to launch it.";
-        setStatus(message);
-        setInstallMessage(message);
+      if (isStandaloneApp() || window.konnectlyIsAppInstalled?.()) {
+        setStatus(APP_ALREADY_INSTALLED_MESSAGE);
+        setInstallMessage(APP_ALREADY_INSTALLED_MESSAGE);
+        setWidgetOpen(false);
         return true;
       }
 
       const installed = await window.konnectlyInstallApp?.();
       if (installed) {
-        const message = "Konnectly app installed. You can open it from your home screen or browser Open in app button.";
+        const message = "Konnectly app install ho gaya hai. Ab aap ise home screen se one-tap open kar sakte hain.";
         setWidgetOpen(false);
         setStatus(message);
         setInstallMessage(message);

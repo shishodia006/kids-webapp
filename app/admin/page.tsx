@@ -167,6 +167,7 @@ export default function AdminPage() {
               <Activities
                 data={data}
                 onCreateEvent={(body) => runAction("Saving activity...", () => postJson("/api/admin/events", body))}
+                onUpdateEvent={(eventId, body) => runAction("Updating activity...", () => requestJson("/api/admin/events", { method: "PATCH", body: { ...body, eventId } }))}
                 onCheckIn={(bookingId) => runAction("Checking in participant and awarding points...", () => postJson("/api/admin/bookings/check-in", { bookingId }))}
               />
             )}
@@ -400,17 +401,26 @@ function AdminFilePreview({ title, source, fallback, fileName }: { title: string
 function Activities({
   data,
   onCreateEvent,
+  onUpdateEvent,
   onCheckIn,
 }: {
   data: AdminData;
   onCreateEvent: (body: Record<string, FormDataEntryValue>) => void;
+  onUpdateEvent: (eventId: number, body: Record<string, FormDataEntryValue>) => void;
   onCheckIn: (bookingId: number) => void;
 }) {
   const [activityTab, setActivityTab] = useState(0);
+  const [editingEvent, setEditingEvent] = useState<AdminEvent | null>(null);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onCreateEvent(Object.fromEntries(new FormData(event.currentTarget)));
+    const body = Object.fromEntries(new FormData(event.currentTarget));
+    if (editingEvent) {
+      onUpdateEvent(editingEvent.id, body);
+      setEditingEvent(null);
+    } else {
+      onCreateEvent(body);
+    }
     event.currentTarget.reset();
   }
 
@@ -420,30 +430,13 @@ function Activities({
       {activityTab === 0 ? (
         <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
           <Panel>
-            <h2 className="text-lg font-black sm:text-xl">Create New Activity</h2>
-            <form onSubmit={submit} className="mt-5 grid gap-4 lg:grid-cols-2">
-              <Field name="title" label="Activity Name *" placeholder="Summer Art Camp 2026" required />
-              <Field name="venue" label="Venue *" placeholder="DLF Phase 2 Community Hall" required />
-              <Field name="date" label="Date" type="date" />
-              <Field name="time" label="Time" type="time" />
-              <Field name="price" label="Registration Fee (Rs)" type="number" min="0" defaultValue="0" />
-              <Field name="pointsEarnable" label="Konnect Points Earned" type="number" min="0" defaultValue="100" />
-              <Field name="capacity" label="Max Participants" type="number" min="1" placeholder="Leave blank for unlimited" />
-              <SelectField name="category" label="Category" options={["Explore", "Engage", "Experience", "Arts & Crafts", "Sports"]} />
-              <Field name="minAge" label="Min Age" type="number" min="0" />
-              <Field name="maxAge" label="Max Age" type="number" min="0" />
-              <SelectField name="gender" label="Gender" options={["All", "Boy", "Girl"]} />
-              <Field name="restrictedArea" label="Restricted Area" placeholder="Optional city/locality" />
-              <label className="grid gap-2 lg:col-span-2">
-                <span className="text-xs font-black">Description</span>
-                <textarea name="description" className="min-h-24 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
-              </label>
-              <div className="lg:col-span-2">
-                <PillButton label="Save Activity" submit />
-              </div>
-            </form>
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-lg font-black sm:text-xl">{editingEvent ? "Edit Activity" : "Create New Activity"}</h2>
+              {editingEvent && <SmallButton label="Cancel Edit" onClick={() => setEditingEvent(null)} />}
+            </div>
+            <ActivityForm key={editingEvent?.id ?? "new"} event={editingEvent} onSubmit={submit} />
           </Panel>
-          <EventList events={data.events} />
+          <EventList events={data.events} onEdit={setEditingEvent} />
         </div>
       ) : (
         <LiveEventStatus data={data} onCheckIn={onCheckIn} />
@@ -452,7 +445,33 @@ function Activities({
   );
 }
 
-function EventList({ events }: { events: AdminEvent[] }) {
+function ActivityForm({ event, onSubmit }: { event: AdminEvent | null; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  return (
+    <form onSubmit={onSubmit} className="mt-5 grid gap-4 lg:grid-cols-2">
+      <Field name="title" label="Activity Name *" placeholder="Summer Art Camp 2026" required defaultValue={event?.title ?? ""} />
+      <Field name="venue" label="Venue *" placeholder="DLF Phase 2 Community Hall" required defaultValue={event?.venue ?? ""} />
+      <Field name="date" label="Date" type="date" defaultValue={event?.dateValue ?? ""} />
+      <Field name="time" label="Time" type="time" defaultValue={event?.timeValue ?? ""} />
+      <Field name="price" label="Registration Fee (Rs)" type="number" min="0" defaultValue={event?.price ?? 0} />
+      <Field name="pointsEarnable" label="Konnect Points Earned" type="number" min="0" defaultValue={event?.pointsEarnable ?? 100} />
+      <Field name="capacity" label="Max Participants" type="number" min="1" placeholder="Leave blank for unlimited" defaultValue={event?.capacity || ""} />
+      <SelectField name="category" label="Category" options={["Explore", "Engage", "Experience", "Arts & Crafts", "Sports"]} defaultValue={event?.category ?? "Experience"} />
+      <Field name="minAge" label="Min Age" type="number" min="0" defaultValue={event?.minAge || ""} />
+      <Field name="maxAge" label="Max Age" type="number" min="0" defaultValue={event?.maxAge || ""} />
+      <SelectField name="gender" label="Gender" options={["All", "Boy", "Girl"]} defaultValue={event?.gender ?? "All"} />
+      <Field name="restrictedArea" label="Restricted Area" placeholder="Optional city/locality" defaultValue={event?.restrictedArea ?? ""} />
+      <label className="grid gap-2 lg:col-span-2">
+        <span className="text-xs font-black">Description</span>
+        <textarea name="description" defaultValue={event?.description ?? ""} className="min-h-24 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
+      </label>
+      <div className="lg:col-span-2">
+        <PillButton label={event ? "Update Activity" : "Save Activity"} submit />
+      </div>
+    </form>
+  );
+}
+
+function EventList({ events, onEdit }: { events: AdminEvent[]; onEdit: (event: AdminEvent) => void }) {
   return (
     <Panel>
       <h2 className="text-lg font-black sm:text-xl">Published Activities</h2>
@@ -466,7 +485,10 @@ function EventList({ events }: { events: AdminEvent[] }) {
                 <p className="mt-1 text-xs font-bold text-[#8f8ba6]">{event.date} - {event.venue || "Venue TBA"}</p>
                 <p className="mt-2 text-xs font-black text-[#5b45d1]">{event.category} - Rs {event.price} - Capacity {event.capacity || "Open"}</p>
               </div>
-              <Badge tone="green">Live in app</Badge>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <Badge tone="green">Live in app</Badge>
+                <SmallButton label="Edit" onClick={() => onEdit(event)} />
+              </div>
             </div>
             {event.description && <p className="mt-3 text-sm font-semibold text-[#8f8ba6]">{event.description}</p>}
           </div>
@@ -540,7 +562,7 @@ function Promotions({ data, onPostUpdate, onCreateHeroSlide }: { data: AdminData
       </div>
 
       {promoTab === 0 && (
-        <div className="grid gap-4 xl:grid-cols-3">
+        <div className="grid gap-4 xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]">
           <HeroSlideForm onSubmit={onCreateHeroSlide} nextOrder={data.heroSlides.length + 1} />
           <HeroSlidesList slides={data.heroSlides} />
         </div>
@@ -568,14 +590,14 @@ function HeroSlideForm({ onSubmit, nextOrder }: { onSubmit: (body: Record<string
   }
 
   return (
-    <Panel className="xl:col-span-1">
+    <Panel className="min-w-0">
       <h2 className="text-lg font-black">Add Hero Slide</h2>
       <p className="mt-1 text-xs font-bold text-[#8f8ba6]">Upload image yahan se app home banner me reflect hogi.</p>
       <form onSubmit={submit} className="mt-4 grid gap-4">
         <Field name="title" label="Slide Title *" required placeholder="Summer Creative Camp" />
         <Field name="subtitle" label="Subtitle" placeholder="Book activities and earn Konnect Points" />
         <FileField name="image" label="Hero Image *" required />
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(112px,150px)]">
           <Field name="ctaLabel" label="Button Text" placeholder="Explore" />
           <Field name="sortOrder" label="Order" type="number" min="0" defaultValue={String(nextOrder)} />
         </div>
@@ -592,7 +614,7 @@ function HeroSlideForm({ onSubmit, nextOrder }: { onSubmit: (body: Record<string
 
 function HeroSlidesList({ slides }: { slides: AdminHeroSlide[] }) {
   return (
-    <div className="grid gap-4 xl:col-span-2">
+    <div className="grid min-w-0 gap-4">
       {slides.length === 0 && <EmptyState text="No hero slides added yet." />}
       {slides.map((slide, index) => (
         <Panel key={slide.id} className="overflow-hidden p-0">
@@ -966,8 +988,8 @@ function BrandCard({ brand, onStatusChange }: { brand: AdminBrand; onStatusChang
         {brand.image ? <img src={brand.image} alt={`${brand.name} reward`} className="h-full w-full object-cover" /> : <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.45),transparent_28%),linear-gradient(135deg,rgba(255,255,255,0.1),rgba(0,0,0,0.18))]" />}
       </div>
       <div className="relative p-5 pt-10">
-        <div className="absolute -top-9 grid h-16 w-16 overflow-hidden rounded-2xl bg-white text-[#604bd1] shadow-lg">
-          {brand.logo ? <img src={brand.logo} alt={`${brand.name} logo`} className="h-full w-full object-contain p-2" /> : <Gift />}
+        <div className="absolute -top-9 grid h-16 w-16 place-items-center rounded-2xl bg-white text-[#604bd1] shadow-lg">
+          {brand.logo ? <img src={brand.logo} alt={`${brand.name} logo`} className="h-full w-full rounded-2xl object-contain p-2" /> : <Gift size={30} strokeWidth={2.4} />}
         </div>
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
@@ -1073,27 +1095,27 @@ function SearchBox({ placeholder }: { placeholder: string }) {
 
 function Field({ label, ...props }: { label: string } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
-    <label className="grid gap-2">
+    <label className="grid min-w-0 gap-2">
       <span className="text-xs font-black">{label}</span>
-      <input {...props} className="h-11 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-2 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
+      <input {...props} className="h-11 w-full min-w-0 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-2 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
     </label>
   );
 }
 
 function FileField({ name, label, required }: { name: string; label: string; required?: boolean }) {
   return (
-    <label className="grid gap-2">
+    <label className="grid min-w-0 gap-2">
       <span className="text-xs font-black">{label}</span>
-      <input name={name} type="file" accept="image/png,image/jpeg,image/webp" required={required} className="rounded-2xl border-2 border-dashed border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-xs font-bold file:mr-3 file:rounded-full file:border-0 file:bg-[#604bd1] file:px-4 file:py-2 file:text-xs file:font-black file:text-white" />
+      <input name={name} type="file" accept="image/png,image/jpeg,image/webp" required={required} className="w-full min-w-0 rounded-2xl border-2 border-dashed border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-xs font-bold file:mr-3 file:rounded-full file:border-0 file:bg-[#604bd1] file:px-4 file:py-2 file:text-xs file:font-black file:text-white" />
     </label>
   );
 }
 
-function SelectField({ label, name, options }: { label: string; name: string; options: string[] }) {
+function SelectField({ label, name, options, defaultValue }: { label: string; name: string; options: string[]; defaultValue?: string }) {
   return (
-    <label className="grid gap-2">
+    <label className="grid min-w-0 gap-2">
       <span className="text-xs font-black">{label}</span>
-      <select name={name} className="h-11 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-2 text-sm font-bold outline-none transition focus:border-[#604bd1]">
+      <select name={name} defaultValue={defaultValue} className="h-11 w-full min-w-0 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-2 text-sm font-bold outline-none transition focus:border-[#604bd1]">
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
     </label>

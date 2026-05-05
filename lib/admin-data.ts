@@ -66,10 +66,17 @@ export type AdminEvent = {
   title: string;
   venue: string;
   date: string;
+  dateValue: string;
+  timeValue: string;
   category: string;
   price: number;
   capacity: number;
   description: string;
+  minAge: number;
+  maxAge: number;
+  gender: string;
+  restrictedArea: string;
+  pointsEarnable: number;
 };
 
 export type AdminParticipant = {
@@ -259,28 +266,51 @@ export async function getAdminData(): Promise<AdminData> {
 export async function createAdminEvent(input: Record<string, unknown>) {
   await requireAdmin();
   await ensureAdminProductSchema();
-  const title = clean(input.title);
-  if (!title) throw new Error("Activity name is required.");
-
-  const date = clean(input.date);
-  const time = clean(input.time) || "00:00";
-  const eventDate = date ? new Date(`${date}T${time}:00`) : null;
+  const event = normalizeEventInput(input);
 
   await executeQuery(
     "INSERT INTO events (title, location, event_date, price, capacity, category, description, min_age, max_age, gender, restricted_area, points_earnable, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)",
     [
-      title,
-      clean(input.venue),
-      eventDate,
-      Number(input.price || 0),
-      input.capacity ? Number(input.capacity) : null,
-      clean(input.category) || "Experience",
-      clean(input.description),
-      input.minAge ? Number(input.minAge) : null,
-      input.maxAge ? Number(input.maxAge) : null,
-      clean(input.gender) || "All",
-      clean(input.restrictedArea),
-      Number(input.pointsEarnable || 100),
+      event.title,
+      event.venue,
+      event.eventDate,
+      event.price,
+      event.capacity,
+      event.category,
+      event.description,
+      event.minAge,
+      event.maxAge,
+      event.gender,
+      event.restrictedArea,
+      event.pointsEarnable,
+    ],
+  );
+}
+
+export async function updateAdminEvent(eventId: number, input: Record<string, unknown>) {
+  await requireAdmin();
+  await ensureAdminProductSchema();
+  if (!eventId) throw new Error("Activity not found.");
+  const event = normalizeEventInput(input);
+
+  await executeQuery(
+    `UPDATE events
+     SET title = ?, location = ?, event_date = ?, price = ?, capacity = ?, category = ?, description = ?, min_age = ?, max_age = ?, gender = ?, restricted_area = ?, points_earnable = ?
+     WHERE id = ?`,
+    [
+      event.title,
+      event.venue,
+      event.eventDate,
+      event.price,
+      event.capacity,
+      event.category,
+      event.description,
+      event.minAge,
+      event.maxAge,
+      event.gender,
+      event.restrictedArea,
+      event.pointsEarnable,
+      eventId,
     ],
   );
 }
@@ -593,15 +623,24 @@ function mapPendingKid(row: AnyRow): AdminKid {
 }
 
 function mapEvent(row: AnyRow): AdminEvent {
+  const eventDate = row.event_date ? new Date(String(row.event_date)) : null;
+  const validDate = eventDate && !Number.isNaN(eventDate.getTime()) ? eventDate : null;
   return {
     id: num(row.id),
     title: str(row.title),
     venue: str(row.location),
-    date: row.event_date ? formatDate(row.event_date) : "Date TBA",
+    date: validDate ? formatDate(row.event_date) : "Date TBA",
+    dateValue: validDate ? validDate.toISOString().slice(0, 10) : "",
+    timeValue: validDate ? validDate.toTimeString().slice(0, 5) : "",
     category: str(row.category) || "Experience",
     price: num(row.price),
     capacity: num(row.capacity),
     description: str(row.description),
+    minAge: num(row.min_age),
+    maxAge: num(row.max_age),
+    gender: str(row.gender) || "All",
+    restrictedArea: str(row.restricted_area),
+    pointsEarnable: num(row.points_earnable) || 100,
   };
 }
 
@@ -669,6 +708,31 @@ function mapRedemption(row: AnyRow): AdminRedemption {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeEventInput(input: Record<string, unknown>) {
+  const title = clean(input.title);
+  if (!title) throw new Error("Activity name is required.");
+
+  const date = clean(input.date);
+  const time = clean(input.time) || "00:00";
+  const eventDate = date ? new Date(`${date}T${time}:00`) : null;
+  if (eventDate && Number.isNaN(eventDate.getTime())) throw new Error("Please enter a valid activity date.");
+
+  return {
+    title,
+    venue: clean(input.venue),
+    eventDate,
+    price: Number(input.price || 0),
+    capacity: input.capacity ? Number(input.capacity) : null,
+    category: clean(input.category) || "Experience",
+    description: clean(input.description),
+    minAge: input.minAge ? Number(input.minAge) : null,
+    maxAge: input.maxAge ? Number(input.maxAge) : null,
+    gender: clean(input.gender) || "All",
+    restrictedArea: clean(input.restrictedArea),
+    pointsEarnable: Number(input.pointsEarnable || 100),
+  };
 }
 
 function cleanImageData(value: unknown) {

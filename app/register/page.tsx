@@ -14,6 +14,8 @@ type RegisterDetails = {
   referralCode: string;
 };
 
+const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app already installed hai. Home screen se open kijiye ya browser ke Open in app button par tap kijiye.";
+
 export default function RegisterPage() {
   return (
     <Suspense fallback={<RegisterFallback />}>
@@ -65,6 +67,20 @@ function RegisterFlow() {
 
   function update(key: keyof RegisterDetails, value: string) {
     setDetails((current) => ({ ...current, [key]: key === "referralCode" ? value.toUpperCase() : value }));
+  }
+
+  async function installAppFromWidget() {
+    if (window.konnectlyIsAppInstalled?.()) {
+      setStatus(APP_ALREADY_INSTALLED_MESSAGE);
+      return;
+    }
+
+    const installed = await window.konnectlyInstallApp?.();
+    setStatus(
+      installed
+        ? "Konnectly app install ho gaya hai. Ab aap ise home screen se one-tap open kar sakte hain."
+        : "Install prompt abhi available nahi hai. Browser menu se Install app ya Add to Home Screen choose kijiye.",
+    );
   }
 
   async function sendOtp(event?: FormEvent<HTMLFormElement>) {
@@ -312,7 +328,8 @@ function RegisterFlow() {
               <WidgetStep title="iOS" body="Tap Share in Safari, choose Add to Home Screen, then tap Add." />
               <WidgetStep title="Android" body="Open the browser menu, choose Install app or Add to Home screen, then confirm." />
             </div>
-            <button type="button" onClick={() => { void window.konnectlyInstallApp?.(); }} className="mt-7 flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white">
+            <Status message={status.includes("Welcome") ? "" : status} />
+            <button type="button" onClick={() => { void installAppFromWidget(); }} className="mt-7 flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white">
               <Bell size={18} /> Add to Home Screen
             </button>
             <button type="button" onClick={() => router.push("/app")} className="mt-3 w-full rounded-full border-2 border-[#dcd7ff] bg-white px-5 py-3 text-sm font-black text-[#5f4bd3]">

@@ -5,6 +5,7 @@ import { useEffect } from "react";
 declare global {
   interface Window {
     konnectlyInstallApp?: () => Promise<boolean>;
+    konnectlyIsAppInstalled?: () => boolean;
     konnectlyNotify?: (notification: KonnectlyNotificationPayload) => Promise<boolean>;
     konnectlyRequestNotifications?: () => Promise<NotificationPermission>;
   }
@@ -23,6 +24,8 @@ type KonnectlyNotificationPayload = {
   vibrate?: number[];
 };
 
+const APP_INSTALL_STORAGE_KEY = "konnectly_app_installed";
+
 export function PwaRegistration() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -35,7 +38,15 @@ export function PwaRegistration() {
       deferredInstallPrompt = event as BeforeInstallPromptEvent;
     }
 
+    function handleAppInstalled() {
+      markAppInstalled();
+      deferredInstallPrompt = null;
+    }
+
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    window.konnectlyIsAppInstalled = isKonnectlyAppInstalled;
 
     window.konnectlyInstallApp = async () => {
       if (!deferredInstallPrompt) {
@@ -48,6 +59,7 @@ export function PwaRegistration() {
       await prompt.prompt();
       const choice = await prompt.userChoice;
       if (choice.outcome === "accepted") {
+        markAppInstalled();
         await window.konnectlyRequestNotifications?.();
       }
       return choice.outcome === "accepted";
@@ -93,11 +105,37 @@ export function PwaRegistration() {
     return () => {
       active = false;
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
       delete window.konnectlyInstallApp;
+      delete window.konnectlyIsAppInstalled;
     };
   }, []);
 
   return null;
+}
+
+function isKonnectlyAppInstalled() {
+  return isStandaloneApp() || hasStoredInstallRecord();
+}
+
+function isStandaloneApp() {
+  return window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+function hasStoredInstallRecord() {
+  try {
+    return window.localStorage.getItem(APP_INSTALL_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function markAppInstalled() {
+  try {
+    window.localStorage.setItem(APP_INSTALL_STORAGE_KEY, "true");
+  } catch {
+    // Installation still succeeds even if storage is unavailable.
+  }
 }
 
 async function savePushSubscription(registration: ServiceWorkerRegistration) {
