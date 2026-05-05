@@ -102,6 +102,8 @@ CREATE TABLE IF NOT EXISTS brands (
   name VARCHAR(190) NOT NULL,
   description TEXT NULL,
   note VARCHAR(255) NULL,
+  logo TEXT NULL,
+  image TEXT NULL,
   points_cost INT NOT NULL DEFAULT 0,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -138,6 +140,21 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_notifications_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS hero_slides (
+  id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+  title VARCHAR(190) NOT NULL,
+  subtitle TEXT NULL,
+  image TEXT NOT NULL,
+  cta_label VARCHAR(80) NULL,
+  target VARCHAR(80) NOT NULL DEFAULT 'activities',
+  sort_order INT NOT NULL DEFAULT 0,
+  is_active TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_hero_slides_active_sort (is_active, sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS referral_rewards (

@@ -104,6 +104,8 @@ CREATE TABLE "brands" (
     "name" VARCHAR(190) NOT NULL,
     "description" TEXT,
     "note" VARCHAR(255),
+    "logo" TEXT,
+    "image" TEXT,
     "points_cost" INTEGER NOT NULL DEFAULT 0,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -136,6 +138,22 @@ CREATE TABLE "notifications" (
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "notifications_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "hero_slides" (
+    "id" SERIAL NOT NULL,
+    "title" VARCHAR(190) NOT NULL,
+    "subtitle" TEXT,
+    "image" TEXT NOT NULL,
+    "cta_label" VARCHAR(80),
+    "target" VARCHAR(80) NOT NULL DEFAULT 'activities',
+    "sort_order" INTEGER NOT NULL DEFAULT 0,
+    "is_active" BOOLEAN NOT NULL DEFAULT true,
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "hero_slides_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -236,6 +254,9 @@ CREATE INDEX "redemptions_status_idx" ON "redemptions"("status");
 
 -- CreateIndex
 CREATE INDEX "notifications_created_at_idx" ON "notifications"("created_at");
+
+-- CreateIndex
+CREATE INDEX "hero_slides_is_active_sort_order_idx" ON "hero_slides"("is_active", "sort_order");
 
 -- CreateIndex
 CREATE INDEX "referral_rewards_referrer_parent_id_idx" ON "referral_rewards"("referrer_parent_id");

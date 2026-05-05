@@ -22,6 +22,7 @@ export type AdminData = {
   events: AdminEvent[];
   liveParticipants: AdminParticipant[];
   notifications: AdminNotification[];
+  heroSlides: AdminHeroSlide[];
   brands: AdminBrand[];
   redemptions: AdminRedemption[];
   topReferrers: AdminReferrer[];
@@ -89,6 +90,17 @@ export type AdminNotification = {
   createdAt: string;
 };
 
+export type AdminHeroSlide = {
+  id: number;
+  title: string;
+  subtitle: string;
+  image: string;
+  ctaLabel: string;
+  target: string;
+  sortOrder: number;
+  active: boolean;
+};
+
 export type AdminBrand = {
   id: number;
   name: string;
@@ -96,6 +108,8 @@ export type AdminBrand = {
   code: string;
   color: string;
   icon: string;
+  logo: string;
+  image: string;
   pointsCost: number;
   active: boolean;
 };
@@ -136,8 +150,9 @@ export async function requireAdmin() {
 
 export async function getAdminData(): Promise<AdminData> {
   await requireAdmin();
+  await ensureAdminProductSchema();
 
-  const [statsRows, users, pendingKids, events, participants, notifications, brands, redemptions, topReferrers, recentReferrals] =
+  const [statsRows, users, pendingKids, events, participants, notifications, heroSlides, brands, redemptions, topReferrers, recentReferrals] =
     await Promise.all([
       queryRows<AnyRow>(`
         SELECT
@@ -170,6 +185,7 @@ export async function getAdminData(): Promise<AdminData> {
         LIMIT 80
       `),
       queryRows<AnyRow>("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 30"),
+      queryRows<AnyRow>("SELECT * FROM hero_slides ORDER BY sort_order ASC, created_at DESC LIMIT 20"),
       queryRows<AnyRow>(`
         SELECT b.*, bu.email, bu.referral_code
         FROM brands b
@@ -220,6 +236,7 @@ export async function getAdminData(): Promise<AdminData> {
     events: events.map(mapEvent),
     liveParticipants: participants.map(mapParticipant),
     notifications: notifications.map(mapNotification),
+    heroSlides: heroSlides.map(mapHeroSlide),
     brands: brands.map(mapBrand),
     redemptions: redemptions.map(mapRedemption),
     topReferrers: topReferrers.map((row, index) => ({
@@ -275,16 +292,49 @@ export async function createAdminNotification(input: Record<string, unknown>) {
   await executeQuery("INSERT INTO notifications (message, type) VALUES (?, ?)", [message, clean(input.type) === "alert" ? "alert" : "announcement"]);
 }
 
+export async function createHeroSlide(input: Record<string, unknown>) {
+  await requireAdmin();
+  await ensureAdminProductSchema();
+  const title = clean(input.title);
+  const image = cleanImageData(input.image);
+  if (!title) throw new Error("Slide title is required.");
+  if (!image) throw new Error("Hero slide image is required.");
+
+  await executeQuery(
+    "INSERT INTO hero_slides (title, subtitle, image, cta_label, target, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+      title,
+      clean(input.subtitle),
+      image,
+      clean(input.ctaLabel) || "Explore",
+      clean(input.target) || "activities",
+      Number(input.sortOrder || 0),
+      isTruthy(input.active),
+    ],
+  );
+}
+
 export async function createAdminBrand(input: Record<string, unknown>) {
   await requireAdmin();
+  await ensureAdminProductSchema();
   const name = clean(input.name);
   if (!name) throw new Error("Brand name is required.");
-  await executeQuery("INSERT INTO brands (name, description, note, points_cost, is_active) VALUES (?, ?, ?, ?, true)", [
+  await executeQuery("INSERT INTO brands (name, description, note, points_cost, logo, image, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)", [
     name,
     clean(input.description),
     clean(input.note),
     Number(input.pointsCost || 250),
+    cleanImageData(input.logo),
+    cleanImageData(input.image),
+    isTruthy(input.active),
   ]);
+}
+
+export async function updateBrandStatus(brandId: number, active: boolean) {
+  await requireAdmin();
+  await ensureAdminProductSchema();
+  if (!brandId) throw new Error("Brand not found.");
+  await executeQuery("UPDATE brands SET is_active = ? WHERE id = ?", [active, brandId]);
 }
 
 export async function updateKidStatus(kidId: number, status: "approved" | "rejected") {
@@ -387,6 +437,8 @@ async function awardReferralOnApproval(kidId: number) {
 
 async function ensureAdminProductSchema() {
   await executeQuery("ALTER TABLE users ADD COLUMN IF NOT EXISTS konnect_points INTEGER NOT NULL DEFAULT 0");
+  await executeQuery("ALTER TABLE brands ADD COLUMN IF NOT EXISTS logo TEXT");
+  await executeQuery("ALTER TABLE brands ADD COLUMN IF NOT EXISTS image TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS photo_data TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS school_id_card_data TEXT");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS min_age INTEGER");
@@ -394,6 +446,21 @@ async function ensureAdminProductSchema() {
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS restricted_area VARCHAR(190)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS points_earnable INTEGER NOT NULL DEFAULT 100");
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS hero_slides (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(190) NOT NULL,
+      subtitle TEXT,
+      image TEXT NOT NULL,
+      cta_label VARCHAR(80),
+      target VARCHAR(80) NOT NULL DEFAULT 'activities',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_hero_slides_active_sort ON hero_slides (is_active, sort_order)");
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS point_ledger (
       id SERIAL PRIMARY KEY,
@@ -560,6 +627,19 @@ function mapNotification(row: AnyRow): AdminNotification {
   };
 }
 
+function mapHeroSlide(row: AnyRow): AdminHeroSlide {
+  return {
+    id: num(row.id),
+    title: str(row.title),
+    subtitle: str(row.subtitle),
+    image: publicPath(str(row.image)),
+    ctaLabel: str(row.cta_label) || "Explore",
+    target: str(row.target) || "activities",
+    sortOrder: num(row.sort_order),
+    active: num(row.is_active ?? 1) === 1,
+  };
+}
+
 function mapBrand(row: AnyRow): AdminBrand {
   const name = str(row.name);
   return {
@@ -569,8 +649,10 @@ function mapBrand(row: AnyRow): AdminBrand {
     code: str(row.referral_code) || `REF-${name.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase() || "BRD"}`,
     color: name.toLowerCase().includes("domino") ? "bg-[#f4484d]" : "bg-[#6754d6]",
     icon: name.toLowerCase().includes("pizza") || name.toLowerCase().includes("domino") ? "Pizza" : "Gift",
+    logo: publicPath(str(row.logo)),
+    image: publicPath(str(row.image)),
     pointsCost: num(row.points_cost),
-    active: Boolean(row.is_active),
+    active: num(row.is_active ?? 1) === 1,
   };
 }
 
@@ -587,6 +669,20 @@ function mapRedemption(row: AnyRow): AdminRedemption {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function cleanImageData(value: unknown) {
+  const image = clean(value);
+  if (!image) return null;
+  if (image.startsWith("data:image/") || image.startsWith("/") || /^https?:\/\//i.test(image)) return image;
+  return null;
+}
+
+function isTruthy(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value !== "string") return true;
+  return ["1", "true", "yes", "on", "active"].includes(value.toLowerCase());
 }
 
 function str(value: unknown) {

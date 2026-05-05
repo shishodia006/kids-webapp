@@ -84,6 +84,15 @@ export type AppNotification = {
   seen?: boolean;
 };
 
+export type AppHeroSlide = {
+  id: number;
+  title: string;
+  subtitle: string;
+  image: string;
+  ctaLabel: string;
+  target: string;
+};
+
 export type AppRewardHistory = {
   id: number;
   month: string;
@@ -104,6 +113,7 @@ export type AppData = {
   bookings: AppBooking[];
   brands: AppBrand[];
   notifications: AppNotification[];
+  heroSlides: AppHeroSlide[];
   latestNotification: AppNotification | null;
   rewardHistory: AppRewardHistory[];
   showWidgetSetup: boolean;
@@ -117,6 +127,7 @@ type EventRow = DbRow & Record<string, unknown>;
 type BookingRow = DbRow & Record<string, unknown>;
 type BrandRow = DbRow & Record<string, unknown>;
 type NotificationRow = DbRow & Record<string, unknown>;
+type HeroSlideRow = DbRow & Record<string, unknown>;
 type RewardHistoryRow = DbRow & Record<string, unknown>;
 
 let productSchemaReady: Promise<void> | null = null;
@@ -141,7 +152,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
   const cookieStore = await cookies();
   const seenNotifId = Number(cookieStore.get("konnectly_seen_notif")?.value || 0);
 
-  const [kids, events, bookings, brands, notifications, rewardHistory] = await Promise.all([
+  const [kids, events, bookings, brands, notifications, heroSlides, rewardHistory] = await Promise.all([
     queryRows<KidRow>("SELECT * FROM kids WHERE parent_id = ? ORDER BY id ASC", [user.id]).then((rows) => rows.map(mapKid)),
     safeRows<EventRow>("SELECT * FROM events ORDER BY event_date ASC, created_at DESC LIMIT 50").then((rows) => rows.map(mapEvent)),
     safeRows<BookingRow>(
@@ -155,6 +166,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
     ).then((rows) => rows.map(mapBooking)),
     safeRows<BrandRow>("SELECT * FROM brands WHERE COALESCE(is_active, true) = true ORDER BY points_cost ASC, id ASC").then((rows) => rows.map(mapBrand)),
     safeRows<NotificationRow>("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20").then((rows) => rows.map(mapNotification)),
+    safeRows<HeroSlideRow>("SELECT * FROM hero_slides WHERE COALESCE(is_active, true) = true ORDER BY sort_order ASC, created_at DESC LIMIT 5").then((rows) => rows.map(mapHeroSlide)),
     safeRows<RewardHistoryRow>(
       `SELECT r.*
        FROM redemptions r
@@ -179,6 +191,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
     bookings,
     brands,
     notifications,
+    heroSlides,
     latestNotification,
     rewardHistory,
     showWidgetSetup: cookieStore.get("konnectly_show_widget_setup")?.value === "1",
@@ -562,6 +575,17 @@ function mapNotification(row: NotificationRow): AppNotification {
   };
 }
 
+function mapHeroSlide(row: HeroSlideRow): AppHeroSlide {
+  return {
+    id: num(row.id),
+    title: str(row.title),
+    subtitle: str(row.subtitle),
+    image: publicPath(str(row.image)),
+    ctaLabel: str(row.cta_label) || "Explore",
+    target: str(row.target) || "activities",
+  };
+}
+
 function isEligibleForEvent(kid: AppKid, user: AppUser, event: AppEvent) {
   if (kid.status !== "approved") return false;
   if (event.minAge && kid.age < event.minAge) return false;
@@ -631,6 +655,21 @@ async function ensureProductSchema() {
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS points_awarded_on_attendance INTEGER NOT NULL DEFAULT 0");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS qr_code VARCHAR(255)");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS hero_slides (
+      id SERIAL PRIMARY KEY,
+      title VARCHAR(190) NOT NULL,
+      subtitle TEXT,
+      image TEXT NOT NULL,
+      cta_label VARCHAR(80),
+      target VARCHAR(80) NOT NULL DEFAULT 'activities',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active BOOLEAN NOT NULL DEFAULT true,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_hero_slides_active_sort ON hero_slides (is_active, sort_order)");
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS point_ledger (
       id SERIAL PRIMARY KEY,

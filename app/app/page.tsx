@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import type { AppBooking, AppBrand, AppData, AppEvent, AppKid, AppNotification, AppRewardHistory } from "@/lib/app-data";
+import type { AppBooking, AppBrand, AppData, AppEvent, AppHeroSlide, AppKid, AppNotification, AppRewardHistory } from "@/lib/app-data";
 import {
   ArrowLeft,
   BatteryFull,
@@ -404,15 +404,15 @@ function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities, onInstallA
 
   return (
     <div className="space-y-3 px-4 py-4">
-      <button onClick={nextEvent ? onOpenActivities : offer ? () => onRedeem(offer) : undefined} className="block w-full text-left" type="button">
-      <section className="relative overflow-hidden rounded-[20px] bg-[#6754d6] px-4 py-5 text-white shadow-sm">
-        <div className="relative">
-          <span className="rounded-full bg-[#f6c400] px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.24em] text-[#1c1740]">Upcoming Event</span>
-          <h2 className="mt-3 text-lg font-black">{nextEvent?.title || "New activities coming soon"}</h2>
-          <p className="mt-2 text-xs font-black text-white/80">{nextEvent ? `${formatDate(nextEvent.eventDate)} | ${nextEvent.location}` : offer ? `${offer.name} voucher is available` : "Watch this space for community events"}</p>
-        </div>
-      </section>
-      </button>
+      <HeroSlider
+        slides={data.heroSlides ?? []}
+        fallbackEvent={nextEvent}
+        fallbackOffer={offer}
+        onOpenActivities={onOpenActivities}
+        onOpenRefer={onOpenRefer}
+        onRedeemOffer={offer ? () => onRedeem(offer) : undefined}
+        onInstallApp={onInstallApp}
+      />
 
       <section>
         <div className="mb-2 flex items-center justify-between">
@@ -464,6 +464,64 @@ function HomeContent({ data, onOpenRefer, onRedeem, onOpenActivities, onInstallA
         </div>
       </section>
     </div>
+  );
+}
+
+function HeroSlider({
+  slides,
+  fallbackEvent,
+  fallbackOffer,
+  onOpenActivities,
+  onOpenRefer,
+  onRedeemOffer,
+  onInstallApp,
+}: {
+  slides: AppHeroSlide[];
+  fallbackEvent?: AppEvent;
+  fallbackOffer?: AppBrand;
+  onOpenActivities: () => void;
+  onOpenRefer: () => void;
+  onRedeemOffer?: () => void;
+  onInstallApp: () => void;
+}) {
+  if (slides.length === 0) {
+    return (
+      <button onClick={fallbackEvent ? onOpenActivities : fallbackOffer ? onRedeemOffer : undefined} className="block w-full text-left" type="button">
+        <section className="relative overflow-hidden rounded-[20px] bg-[#6754d6] px-4 py-5 text-white shadow-sm">
+          <div className="relative">
+            <span className="rounded-full bg-[#f6c400] px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.24em] text-[#1c1740]">Upcoming Event</span>
+            <h2 className="mt-3 text-lg font-black">{fallbackEvent?.title || "New activities coming soon"}</h2>
+            <p className="mt-2 text-xs font-black text-white/80">{fallbackEvent ? `${formatDate(fallbackEvent.eventDate)} | ${fallbackEvent.location}` : fallbackOffer ? `${fallbackOffer.name} voucher is available` : "Watch this space for community events"}</p>
+          </div>
+        </section>
+      </button>
+    );
+  }
+
+  function handleSlide(slide: AppHeroSlide) {
+    if (slide.target === "activities") onOpenActivities();
+    if (slide.target === "refer") onOpenRefer();
+    if (slide.target === "install") onInstallApp();
+    if (slide.target === "rewards") onRedeemOffer?.();
+  }
+
+  return (
+    <section className="-mx-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex gap-3">
+        {slides.map((slide) => (
+          <button key={slide.id} onClick={() => handleSlide(slide)} className="relative h-44 w-[86%] shrink-0 overflow-hidden rounded-[22px] bg-[#33257e] text-left text-white shadow-sm" type="button">
+            <img src={slide.image} alt={slide.title} className="absolute inset-0 h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#1c1740]/86 via-[#1c1740]/42 to-transparent" />
+            <div className="relative flex h-full flex-col justify-end p-4">
+              <span className="w-fit rounded-full bg-[#f6c400] px-3 py-1 text-[10px] font-black uppercase tracking-[0.2em] text-[#1c1740]">Featured</span>
+              <h2 className="mt-3 text-lg font-black leading-tight">{slide.title}</h2>
+              <p className="mt-1.5 line-clamp-2 text-xs font-bold text-white/80">{slide.subtitle}</p>
+              <span className="mt-3 w-fit rounded-full bg-white/18 px-3.5 py-1.5 text-xs font-black">{slide.ctaLabel}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 

@@ -6,6 +6,7 @@ import type {
   AdminBrand,
   AdminData,
   AdminEvent,
+  AdminHeroSlide,
   AdminKid,
   AdminMember,
   AdminNotification,
@@ -169,11 +170,20 @@ export default function AdminPage() {
                 onCheckIn={(bookingId) => runAction("Checking in participant and awarding points...", () => postJson("/api/admin/bookings/check-in", { bookingId }))}
               />
             )}
-            {data && activeSection === "Promotions & Updates" && <Promotions data={data} onPostUpdate={() => setModal("notification")} />}
+            {data && activeSection === "Promotions & Updates" && (
+              <Promotions
+                data={data}
+                onPostUpdate={() => setModal("notification")}
+                onCreateHeroSlide={(body) => runAction("Adding hero slide...", () => postJson("/api/admin/hero-slides", body))}
+              />
+            )}
             {data && activeSection === "Business" && (
               <Business
                 data={data}
                 onAddBrand={() => setModal("brand")}
+                onBrandStatus={(brandId, active) =>
+                  runAction(`${active ? "Enabling" : "Disabling"} brand...`, () => requestJson("/api/admin/brands", { method: "PATCH", body: { brandId, active } }))
+                }
                 onRedemptionStatus={(redemptionId, nextStatus) =>
                   runAction("Updating voucher status...", () => postJson("/api/admin/redemptions/status", { redemptionId, status: nextStatus }))
                 }
@@ -245,7 +255,7 @@ function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kid
         <StatCard title="Paid Bookings" value={data.stats.paidBookings.toString()} note={`${data.stats.checkedIn} checked in`} tone="dark" />
       </div>
 
-      <SegmentedTabs tabs={["Active Memberships", "Pending Approvals"]} activeIndex={membershipTab} badge={`${data.pendingKids.length}`} onSelect={setMembershipTab} />
+      <SegmentedTabs tabs={["Active Memberships", "Pending Approvals"]} activeIndex={membershipTab} badges={[data.members.length, data.pendingKids.length]} onSelect={setMembershipTab} />
 
       {membershipTab === 0 ? (
         <div className="space-y-4">
@@ -519,9 +529,8 @@ function LiveEventStatus({ data, onCheckIn }: { data: AdminData; onCheckIn: (boo
   );
 }
 
-function Promotions({ data, onPostUpdate }: { data: AdminData; onPostUpdate: () => void }) {
+function Promotions({ data, onPostUpdate, onCreateHeroSlide }: { data: AdminData; onPostUpdate: () => void; onCreateHeroSlide: (body: Record<string, unknown>) => void }) {
   const [promoTab, setPromoTab] = useState(0);
-  const slides = data.events.slice(0, 3);
 
   return (
     <div className="space-y-5">
@@ -532,12 +541,78 @@ function Promotions({ data, onPostUpdate }: { data: AdminData; onPostUpdate: () 
 
       {promoTab === 0 && (
         <div className="grid gap-4 xl:grid-cols-3">
-          {slides.length === 0 && <EmptyState text="No events available for hero slides yet." />}
-          {slides.map((event, index) => <PromoCard key={event.id} title={event.title} body={`${event.date} - ${event.venue || "Venue TBA"}`} badge={`Slide ${index + 1}`} />)}
+          <HeroSlideForm onSubmit={onCreateHeroSlide} nextOrder={data.heroSlides.length + 1} />
+          <HeroSlidesList slides={data.heroSlides} />
         </div>
       )}
       {promoTab === 1 && <UpdatesPush notifications={data.notifications} />}
       {promoTab === 2 && <RewardPromos brands={data.brands} />}
+    </div>
+  );
+}
+
+function HeroSlideForm({ onSubmit, nextOrder }: { onSubmit: (body: Record<string, unknown>) => void; nextOrder: number }) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    onSubmit({
+      title: form.get("title"),
+      subtitle: form.get("subtitle"),
+      ctaLabel: form.get("ctaLabel"),
+      target: form.get("target"),
+      sortOrder: form.get("sortOrder"),
+      active: form.get("active") === "on",
+      image: await fileToDataUrl(form.get("image")),
+    });
+    event.currentTarget.reset();
+  }
+
+  return (
+    <Panel className="xl:col-span-1">
+      <h2 className="text-lg font-black">Add Hero Slide</h2>
+      <p className="mt-1 text-xs font-bold text-[#8f8ba6]">Upload image yahan se app home banner me reflect hogi.</p>
+      <form onSubmit={submit} className="mt-4 grid gap-4">
+        <Field name="title" label="Slide Title *" required placeholder="Summer Creative Camp" />
+        <Field name="subtitle" label="Subtitle" placeholder="Book activities and earn Konnect Points" />
+        <FileField name="image" label="Hero Image *" required />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field name="ctaLabel" label="Button Text" placeholder="Explore" />
+          <Field name="sortOrder" label="Order" type="number" min="0" defaultValue={String(nextOrder)} />
+        </div>
+        <SelectField label="Click Action" name="target" options={["activities", "rewards", "refer", "install", "none"]} />
+        <label className="flex items-center justify-between gap-4 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3">
+          <span className="text-xs font-black">Active</span>
+          <input name="active" type="checkbox" defaultChecked className="h-5 w-5 accent-[#604bd1]" />
+        </label>
+        <PillButton label="Save Slide" submit />
+      </form>
+    </Panel>
+  );
+}
+
+function HeroSlidesList({ slides }: { slides: AdminHeroSlide[] }) {
+  return (
+    <div className="grid gap-4 xl:col-span-2">
+      {slides.length === 0 && <EmptyState text="No hero slides added yet." />}
+      {slides.map((slide, index) => (
+        <Panel key={slide.id} className="overflow-hidden p-0">
+          <div className="grid gap-0 md:grid-cols-[220px_1fr]">
+            <div className="h-40 bg-[#6754d6] md:h-full">
+              <img src={slide.image} alt={slide.title} className="h-full w-full object-cover" />
+            </div>
+            <div className="p-5">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge tone="purple">Slide {index + 1}</Badge>
+                <Badge tone={slide.active ? "green" : "gold"}>{slide.active ? "Active" : "Inactive"}</Badge>
+                <Badge tone="soft">{slide.target}</Badge>
+              </div>
+              <h3 className="mt-4 text-lg font-black">{slide.title}</h3>
+              <p className="mt-2 text-sm font-semibold text-[#8f8ba6]">{slide.subtitle || "No subtitle"}</p>
+              <p className="mt-4 text-xs font-black text-[#5b45d1]">{slide.ctaLabel} | Order {slide.sortOrder}</p>
+            </div>
+          </div>
+        </Panel>
+      ))}
     </div>
   );
 }
@@ -587,10 +662,12 @@ function RewardPromos({ brands }: { brands: AdminBrand[] }) {
 function Business({
   data,
   onAddBrand,
+  onBrandStatus,
   onRedemptionStatus,
 }: {
   data: AdminData;
   onAddBrand: () => void;
+  onBrandStatus: (brandId: number, active: boolean) => void;
   onRedemptionStatus: (redemptionId: number, status: "issued" | "redeemed" | "cancelled") => void;
 }) {
   const [businessTab, setBusinessTab] = useState(0);
@@ -598,13 +675,13 @@ function Business({
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <SegmentedTabs tabs={["Brands", "Voucher Redemptions"]} activeIndex={businessTab} onSelect={setBusinessTab} />
+        <SegmentedTabs tabs={["Brands", "Voucher Redemptions"]} activeIndex={businessTab} badges={[data.brands.length, data.redemptions.length]} onSelect={setBusinessTab} />
         {businessTab === 0 && <PillButton icon={<CirclePlus size={18} />} label="Add Brand" onClick={onAddBrand} />}
       </div>
       {businessTab === 0 ? (
         <div className="grid gap-4 xl:grid-cols-2">
           {data.brands.length === 0 && <EmptyState text="No reward brands yet." />}
-          {data.brands.map((brand) => <BrandCard key={brand.id} brand={brand} />)}
+          {data.brands.map((brand) => <BrandCard key={brand.id} brand={brand} onStatusChange={onBrandStatus} />)}
         </div>
       ) : (
         <RedemptionsTable redemptions={data.redemptions} onRedemptionStatus={onRedemptionStatus} />
@@ -739,10 +816,19 @@ function NotificationModal({ onClose, onSubmit }: { onClose: () => void; onSubmi
   );
 }
 
-function BrandModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (body: Record<string, FormDataEntryValue>) => void }) {
-  function submit(event: FormEvent<HTMLFormElement>) {
+function BrandModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (body: Record<string, unknown>) => void }) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSubmit(Object.fromEntries(new FormData(event.currentTarget)));
+    const form = new FormData(event.currentTarget);
+    onSubmit({
+      name: form.get("name"),
+      pointsCost: form.get("pointsCost"),
+      note: form.get("note"),
+      description: form.get("description"),
+      active: form.get("active") === "on",
+      logo: await fileToDataUrl(form.get("logo")),
+      image: await fileToDataUrl(form.get("image")),
+    });
   }
 
   return (
@@ -751,6 +837,17 @@ function BrandModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (bod
         <Field name="name" label="Brand Name *" required placeholder="Domino's Pizza" />
         <Field name="pointsCost" label="Points Required" type="number" min="0" defaultValue="250" />
         <Field name="note" label="Reward Note" placeholder="Flat 20% off on selected items" />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FileField name="logo" label="Brand Logo" />
+          <FileField name="image" label="Reward Photo / Banner" />
+        </div>
+        <label className="flex items-center justify-between gap-4 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3">
+          <span>
+            <span className="block text-xs font-black">Brand Active</span>
+            <span className="text-xs font-bold text-[#8f8ba6]">Off karne par user app me reward hide ho jayega.</span>
+          </span>
+          <input name="active" type="checkbox" defaultChecked className="h-5 w-5 accent-[#604bd1]" />
+        </label>
         <label className="grid gap-2">
           <span className="text-xs font-black">Description</span>
           <textarea name="description" className="min-h-24 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
@@ -826,7 +923,7 @@ function NavGroup({
               {active && <span className="absolute left-0 top-2 h-8 w-1 rounded-r-full bg-[#f8c400]" />}
               <span className="grid h-5 w-5 place-items-center text-white/70">{item.icon}</span>
               <span className="truncate">{item.section}</span>
-              {typeof count === "number" && count > 0 && <span className="ml-auto rounded-full bg-[#f8c400] px-2.5 py-0.5 text-xs font-black text-[#25166f]">{count}</span>}
+              {typeof count === "number" && <span className="ml-auto rounded-full bg-[#f8c400] px-2.5 py-0.5 text-xs font-black text-[#25166f]">{count}</span>}
             </button>
           );
         })}
@@ -862,30 +959,23 @@ function MemberCard({ member }: { member: AdminMember }) {
   );
 }
 
-function PromoCard({ title, body, badge }: { title: string; body: string; badge: string }) {
+function BrandCard({ brand, onStatusChange }: { brand: AdminBrand; onStatusChange: (brandId: number, active: boolean) => void }) {
   return (
     <Panel className="overflow-hidden p-0">
-      <div className="grid min-h-36 place-items-center bg-[#604bd1] px-5 text-center text-xl font-black leading-relaxed text-white">{title}</div>
-      <div className="p-5">
-        <h3 className="text-base font-black">{title}</h3>
-        <p className="mt-2 text-xs font-semibold leading-relaxed text-[#8f8ba6] sm:text-sm">{body}</p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Badge tone="green">Visible</Badge>
-          <Badge tone="soft">{badge}</Badge>
-        </div>
+      <div className={`relative h-32 overflow-hidden ${brand.color || "bg-[#6754d6]"}`}>
+        {brand.image ? <img src={brand.image} alt={`${brand.name} reward`} className="h-full w-full object-cover" /> : <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.45),transparent_28%),linear-gradient(135deg,rgba(255,255,255,0.1),rgba(0,0,0,0.18))]" />}
       </div>
-    </Panel>
-  );
-}
-
-function BrandCard({ brand }: { brand: AdminBrand }) {
-  return (
-    <Panel className="overflow-hidden p-0">
-      <div className={`h-28 ${brand.color || "bg-[#6754d6]"}`} />
       <div className="relative p-5 pt-10">
-        <div className="absolute -top-9 grid h-16 w-16 place-items-center rounded-2xl bg-white text-[#604bd1] shadow-lg"><Gift /></div>
-        <h3 className="text-lg font-black">{brand.name}</h3>
-        <p className="mt-2 text-xs font-semibold text-[#8f8ba6] sm:text-sm">{brand.email}</p>
+        <div className="absolute -top-9 grid h-16 w-16 overflow-hidden rounded-2xl bg-white text-[#604bd1] shadow-lg">
+          {brand.logo ? <img src={brand.logo} alt={`${brand.name} logo`} className="h-full w-full object-contain p-2" /> : <Gift />}
+        </div>
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="truncate text-lg font-black">{brand.name}</h3>
+            <p className="mt-2 text-xs font-semibold text-[#8f8ba6] sm:text-sm">{brand.email}</p>
+          </div>
+          <ToggleSwitch checked={brand.active} onChange={(active) => onStatusChange(brand.id, active)} />
+        </div>
         <div className="mt-5 flex flex-wrap gap-3">
           <Badge tone="soft">{brand.code}</Badge>
           <Badge tone="gold">{brand.pointsCost} pts</Badge>
@@ -914,15 +1004,30 @@ function ComingSoonModal({ title, onClose }: { title: string; onClose: () => voi
   );
 }
 
-function SegmentedTabs({ tabs, activeIndex, badge, onSelect }: { tabs: string[]; activeIndex: number; badge?: string; onSelect?: (index: number) => void }) {
+function SegmentedTabs({
+  tabs,
+  activeIndex,
+  badge,
+  badges,
+  onSelect,
+}: {
+  tabs: string[];
+  activeIndex: number;
+  badge?: string;
+  badges?: Array<number | string>;
+  onSelect?: (index: number) => void;
+}) {
   return (
     <div className="flex w-full gap-2 overflow-x-auto rounded-[18px] border border-[#e7e1fb] bg-white p-1.5 shadow-sm sm:w-fit">
-      {tabs.map((tab, index) => (
-        <button key={tab} onClick={() => onSelect?.(index)} className={`flex shrink-0 items-center gap-2 rounded-2xl px-3.5 py-2 text-xs font-black transition ${index === activeIndex ? "bg-[#604bd1] text-white shadow-lg shadow-[#604bd1]/20" : "text-[#8f8ba6] hover:bg-[#f6f3ff]"}`} type="button">
-          {tab}
-          {badge && index === 1 && <span className="rounded-full bg-[#ff9d00] px-2 py-0.5 text-xs text-white">{badge}</span>}
-        </button>
-      ))}
+      {tabs.map((tab, index) => {
+        const tabBadge = badges?.[index] ?? (badge && index === 1 ? badge : undefined);
+        return (
+          <button key={tab} onClick={() => onSelect?.(index)} className={`flex shrink-0 items-center gap-2 rounded-2xl px-3.5 py-2 text-xs font-black transition ${index === activeIndex ? "bg-[#604bd1] text-white shadow-lg shadow-[#604bd1]/20" : "text-[#8f8ba6] hover:bg-[#f6f3ff]"}`} type="button">
+            {tab}
+            {tabBadge !== undefined && <span className={`rounded-full px-2 py-0.5 text-xs font-black ${index === activeIndex ? "bg-white/20 text-white" : "bg-[#ff9d00] text-white"}`}>{tabBadge}</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -975,6 +1080,15 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
   );
 }
 
+function FileField({ name, label, required }: { name: string; label: string; required?: boolean }) {
+  return (
+    <label className="grid gap-2">
+      <span className="text-xs font-black">{label}</span>
+      <input name={name} type="file" accept="image/png,image/jpeg,image/webp" required={required} className="rounded-2xl border-2 border-dashed border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-xs font-bold file:mr-3 file:rounded-full file:border-0 file:bg-[#604bd1] file:px-4 file:py-2 file:text-xs file:font-black file:text-white" />
+    </label>
+  );
+}
+
 function SelectField({ label, name, options }: { label: string; name: string; options: string[] }) {
   return (
     <label className="grid gap-2">
@@ -998,6 +1112,20 @@ function SmallButton({ label, danger, disabled, onClick }: { label: string; dang
   return (
     <button onClick={onClick} disabled={disabled} className={`rounded-full px-4 py-2 font-black transition disabled:cursor-not-allowed disabled:opacity-45 ${danger ? "bg-[#fa535b] text-xs text-white hover:bg-[#ee3f48]" : "border-2 border-[#e7e1fb] bg-white text-xs text-[#5b45d1] hover:bg-[#f6f3ff]"}`} type="button">
       {label}
+    </button>
+  );
+}
+
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      onClick={() => onChange(!checked)}
+      className={`flex h-8 w-14 shrink-0 items-center rounded-full p-1 transition ${checked ? "bg-green-500" : "bg-[#d8d1ee]"}`}
+    >
+      <span className={`h-6 w-6 rounded-full bg-white shadow-md transition ${checked ? "translate-x-6" : "translate-x-0"}`} />
     </button>
   );
 }
@@ -1051,8 +1179,25 @@ function EmptyState({ text }: { text: string }) {
 }
 
 async function postJson(url: string, body: unknown) {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return requestJson(url, { method: "POST", body });
+}
+
+async function requestJson(url: string, options: { method: "POST" | "PATCH"; body: unknown }) {
+  const response = await fetch(url, { method: options.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(options.body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message || "Request failed.");
   return data;
+}
+
+async function fileToDataUrl(value: FormDataEntryValue | null) {
+  if (!(value instanceof File) || value.size === 0) return "";
+  if (!value.type.startsWith("image/")) throw new Error("Please upload only image files for brand logo/photo.");
+  if (value.size > 1_500_000) throw new Error("Brand images must be smaller than 1.5 MB.");
+
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Unable to read selected image."));
+    reader.readAsDataURL(value);
+  });
 }
