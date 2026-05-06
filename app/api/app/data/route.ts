@@ -10,10 +10,11 @@ export async function GET(request: Request) {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load app data.";
+    const isAuthError = message === "Unauthorized" || message.includes("parent account");
     return Response.json(
       { message },
       {
-        status: message === "Unauthorized" ? 401 : 500,
+        status: isAuthError ? 401 : 500,
         headers: { "Cache-Control": "no-store, no-cache, must-revalidate" },
       },
     );

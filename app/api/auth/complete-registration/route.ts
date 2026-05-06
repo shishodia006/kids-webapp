@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       nextStep: "set-password",
     });
 
-    response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(phone), getSessionCookieOptions());
+    response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(phone, "user"), getSessionCookieOptions());
     response.cookies.set("konnectly_show_widget_setup", "1", {
       path: "/",
       sameSite: "lax",

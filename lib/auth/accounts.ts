@@ -3,6 +3,7 @@ import "server-only";
 import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import { executeQuery, queryOne, queryRows, type DbRow } from "@/lib/db";
+import type { AuthRole } from "@/lib/auth/session";
 
 export type RegisterDetails = {
   fatherName: string;
@@ -65,7 +66,7 @@ export async function assertCanLogin(phone: string, password: unknown) {
     return { ok: false as const, message: "Invalid mobile number or password." };
   }
 
-  return { ok: true as const };
+  return { ok: true as const, role: normalizeAccountRole(user.role) };
 }
 
 export async function assertCanRegister(phone: string, referralCode: unknown) {
@@ -329,4 +330,10 @@ async function awardReferralBonus(referrerParentId: number, referredParentId: nu
 
 function stringValue(value: unknown) {
   return value == null ? "" : String(value);
+}
+
+function normalizeAccountRole(value: unknown): AuthRole {
+  const role = stringValue(value);
+  if (role === "admin" || role === "brand") return role;
+  return "user";
 }

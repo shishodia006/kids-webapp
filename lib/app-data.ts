@@ -74,6 +74,8 @@ export type AppBrand = {
   name: string;
   pointsCost: number;
   note: string;
+  logo: string;
+  image: string;
   isActive: boolean;
 };
 
@@ -148,15 +150,17 @@ let productSchemaReady: Promise<void> | null = null;
 let expireIssuedVouchersReady: Promise<void> | null = null;
 let expireIssuedVouchersLastRun = 0;
 const EXPIRE_ISSUED_VOUCHERS_INTERVAL_MS = 60_000;
+const PARENT_ACCOUNT_REQUIRED = "Please login with a parent account to use the app.";
 
 export async function getCurrentSession() {
   const cookieStore = await cookies();
   return verifySessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
 }
 
-export async function requireCurrentUser() {
+export async function requireCurrentUser(options: { parentOnly?: boolean } = {}) {
   const session = await getCurrentSession();
   if (!session) throw new Error("Unauthorized");
+  if (options.parentOnly && session.role !== "user") throw new Error(PARENT_ACCOUNT_REQUIRED);
 
   const user = await queryOne<UserRow>("SELECT * FROM users WHERE mobile = ? LIMIT 1", [session.phone]);
   if (!user) throw new Error("User not found");
@@ -165,7 +169,7 @@ export async function requireCurrentUser() {
 }
 
 export async function getAppData(origin = ""): Promise<AppData> {
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
   await ensureProductSchemaOnce();
   await expireIssuedVouchers();
   const cookieStore = await cookies();
@@ -231,7 +235,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
 
 export async function addChildProfile(input: Record<string, unknown>) {
   await ensureProductSchemaOnce();
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
   const currentKids = await queryRows<KidRow>("SELECT id FROM kids WHERE parent_id = ?", [user.id]);
   if (currentKids.length >= 3) throw new Error("You can add up to 3 child profiles.");
 
@@ -291,7 +295,7 @@ export async function addChildProfile(input: Record<string, unknown>) {
 
 export async function updateParentProfile(input: Record<string, unknown>) {
   await ensureProductSchemaOnce();
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
 
   const parentName = clean(input.parentName);
   const email = clean(input.email).toLowerCase();
@@ -346,7 +350,7 @@ export async function updateParentProfile(input: Record<string, unknown>) {
 
 export async function updateChildProfile(input: Record<string, unknown>) {
   await ensureProductSchemaOnce();
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
   const kidId = Number(input.kidId);
   if (!kidId) throw new Error("Kid profile is required.");
 
@@ -390,7 +394,7 @@ export async function updateChildProfile(input: Record<string, unknown>) {
 }
 
 export async function switchActiveKid(kidId: number) {
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
   const kid = await queryOne<KidRow>("SELECT id FROM kids WHERE id = ? AND parent_id = ? LIMIT 1", [kidId, user.id]);
   if (!kid) throw new Error("Kid not found");
 
@@ -430,7 +434,7 @@ export async function savePushSubscription(subscription: unknown) {
 
 export async function redeemBrand(brandId: number) {
   await ensureProductSchemaOnce();
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
   const cookieStore = await cookies();
   const activeKidId = Number(cookieStore.get("konnectly_active_kid_id")?.value || 0);
   const kid = await queryOne<KidRow>("SELECT * FROM kids WHERE id = ? AND parent_id = ? LIMIT 1", [activeKidId, user.id]);
@@ -485,7 +489,7 @@ export async function redeemBrand(brandId: number) {
 
 export async function confirmBooking({ eventId, kidIds, amount, razorpayPaymentId, origin }: { eventId: number; kidIds: number[]; amount: number; razorpayPaymentId: string; origin: string }) {
   await ensureProductSchemaOnce();
-  const user = await requireCurrentUser();
+  const user = await requireCurrentUser({ parentOnly: true });
   const cleanKidIds = [...new Set(kidIds.filter(Number))];
   if (!cleanKidIds.length) throw new Error("Select at least one kid.");
 
@@ -668,6 +672,8 @@ function mapBrand(row: BrandRow): AppBrand {
     name: str(row.name) || "Reward",
     pointsCost: num(row.points_cost),
     note: str(row.note ?? row.description),
+    logo: publicPath(str(row.logo)),
+    image: publicPath(str(row.image)),
     isActive: num(row.is_active ?? 1) === 1,
   };
 }

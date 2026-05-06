@@ -46,7 +46,12 @@ self.addEventListener("push", (event) => {
     url: DEFAULT_APP_URL,
   });
 
-  event.waitUntil(showKonnectlyNotification(data));
+  event.waitUntil(
+    (async () => {
+      await showKonnectlyNotification(data);
+      await notifyOpenClients(data);
+    })(),
+  );
 });
 
 self.addEventListener("message", (event) => {
@@ -129,4 +134,17 @@ function sameAppSection(clientUrl, targetUrl) {
   if (targetUrl.startsWith(BRAND_APP_URL)) return normalizedClientUrl.startsWith(BRAND_APP_URL);
   if (targetUrl.startsWith(DEFAULT_APP_URL)) return normalizedClientUrl.startsWith(DEFAULT_APP_URL);
   return false;
+}
+
+async function notifyOpenClients(data) {
+  const windowClients = await clients.matchAll({ type: "window", includeUncontrolled: true });
+  await Promise.all(
+    windowClients.map((client) =>
+      client.postMessage({
+        type: "KONNECTLY_DATA_CHANGED",
+        url: normalizeTargetUrl(data.url || DEFAULT_APP_URL),
+        tag: data.tag || "konnectly-notification",
+      }),
+    ),
+  );
 }

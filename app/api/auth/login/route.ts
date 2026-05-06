@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     }
 
     const response = NextResponse.json({ message: "Logged in successfully." });
-    response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(phone), getSessionCookieOptions());
+    response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(phone, gate.role), getSessionCookieOptions());
     return response;
   } catch (error) {
     console.error(error);

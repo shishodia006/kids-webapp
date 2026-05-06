@@ -15,7 +15,6 @@ import {
   Gift,
   Grid2X2,
   History,
-  Home,
   LogOut,
   MapPin,
   Paperclip,
@@ -46,11 +45,11 @@ declare global {
   }
 }
 
-const navItems: Array<{ label: NavLabel; icon: typeof Home }> = [
-  { label: "Home", icon: Home },
-  { label: "Activities", icon: Grid2X2 },
-  { label: "Updates", icon: Bell },
-  { label: "Account", icon: User },
+const navItems: Array<{ label: NavLabel; icon: string }> = [
+  { label: "Home", icon: "\u{1F3E0}" },
+  { label: "Activities", icon: "\u{1F3AF}" },
+  { label: "Updates", icon: "\u{1F514}" },
+  { label: "Account", icon: "\u{1F464}" },
 ];
 
 const APP_DATA_CACHE_KEY = "konnectly_app_data_v1";
@@ -58,6 +57,7 @@ const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app already installed hai. Home
 
 export default function UserApp() {
   const navInitializedRef = useRef(false);
+  const refreshInFlightRef = useRef(false);
   const [data, setData] = useState<AppData | null>(null);
   const [status, setStatus] = useState("Loading your Konnectly dashboard...");
   const [activeNav, setActiveNav] = useState<NavLabel>("Home");
@@ -81,6 +81,8 @@ export default function UserApp() {
   }, []);
 
   const loadData = useCallback(async function loadData() {
+    if (refreshInFlightRef.current) return;
+    refreshInFlightRef.current = true;
     try {
       const response = await fetch("/api/app/data", { cache: "no-store" });
       if (response.status === 401) {
@@ -97,6 +99,8 @@ export default function UserApp() {
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load app data.");
+    } finally {
+      refreshInFlightRef.current = false;
     }
   }, [setInitialNav]);
 
@@ -126,6 +130,33 @@ export default function UserApp() {
     const timer = window.setInterval(updateTime, 30000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    function refreshWhenVisible() {
+      if (document.visibilityState === "visible") void loadData();
+    }
+
+    const timer = window.setInterval(refreshWhenVisible, 10000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [loadData]);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+
+    function handleServiceWorkerMessage(event: MessageEvent) {
+      if (event.data?.type === "KONNECTLY_DATA_CHANGED") void loadData();
+    }
+
+    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+    return () => navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
+  }, [loadData]);
 
   useEffect(() => {
     const media = window.matchMedia("(display-mode: standalone)");
@@ -558,17 +589,28 @@ function HomeContent({
           {data.brands.map((brand) => {
             const locked = data.user.konnectPoints < brand.pointsCost;
             return (
-              <div key={brand.id} className="rounded-[18px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb]">
-                <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#fff5d9] text-[#c99000]">
-                  <Gift size={28} />
+              <div key={brand.id} className="overflow-hidden rounded-[18px] bg-white shadow-sm ring-1 ring-[#e9e4fb]">
+                <div className="relative h-24 bg-[#fff5d9]">
+                  {brand.image ? (
+                    <img src={brand.image} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="grid h-full place-items-center bg-[#6754d6] text-white">
+                      <Gift size={32} />
+                    </div>
+                  )}
+                  <div className="absolute -bottom-7 left-3 grid h-14 w-14 place-items-center overflow-hidden rounded-2xl bg-white text-[#c99000] shadow-lg ring-1 ring-[#efeafd]">
+                    {brand.logo ? <img src={brand.logo} alt={`${brand.name} logo`} className="h-full w-full object-contain p-2" /> : <Gift size={26} />}
+                  </div>
                 </div>
-                <h3 className="mt-3 text-sm font-black text-[#292444]">{brand.name}</h3>
-                <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#eee7ff] px-3 py-1 text-xs font-black text-[#5f4bd2]">
-                  <Star size={14} /> {brand.pointsCost} pts
-                </span>
-                <button onClick={() => onRedeem(brand)} disabled={locked} className="mt-3 w-full rounded-full bg-[#f2f0fb] py-2 text-xs font-black text-[#5f4bd2] disabled:text-[#8d89a6]" type="button">
-                  {locked ? "Locked" : "Redeem"}
-                </button>
+                <div className="px-4 pb-4 pt-9">
+                  <h3 className="text-sm font-black text-[#292444]">{brand.name}</h3>
+                  <span className="mt-2 inline-flex items-center gap-1 rounded-full bg-[#eee7ff] px-3 py-1 text-xs font-black text-[#5f4bd2]">
+                    <Star size={14} /> {brand.pointsCost} pts
+                  </span>
+                  <button onClick={() => onRedeem(brand)} disabled={locked} className="mt-3 w-full rounded-full bg-[#f2f0fb] py-2 text-xs font-black text-[#5f4bd2] disabled:text-[#8d89a6]" type="button">
+                    {locked ? "Locked" : "Redeem"}
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -1814,11 +1856,12 @@ function BottomNav({ activeNav, onSelect }: { activeNav: NavLabel; onSelect: (na
   return (
     <nav className="absolute bottom-0 left-0 right-0 z-10 grid grid-cols-4 border-t border-[#ece8fb] bg-white px-3 pb-2.5 pt-2 shadow-[0_-12px_30px_rgba(40,31,91,0.08)]">
       {navItems.map((item) => {
-        const Icon = item.icon;
         const active = activeNav === item.label;
         return (
-          <button key={item.label} onClick={() => onSelect(item.label)} className={`grid place-items-center gap-1 text-[11px] font-black ${active ? "text-[#5f4bd2]" : "text-[#b8b6c8]"}`} type="button">
-            <Icon size={21} strokeWidth={active ? 2.6 : 2.2} />
+          <button key={item.label} onClick={() => onSelect(item.label)} className={`grid place-items-center justify-items-center gap-1 text-center text-[11px] font-black ${active ? "text-[#5f4bd2]" : "text-[#b8b6c8]"}`} type="button">
+            <span className="inline-flex h-[22px] w-[26px] -translate-x-[1px] items-center justify-center text-center text-[21px] leading-none" aria-hidden="true">
+              {item.icon}
+            </span>
             <span>{item.label}</span>
             <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-[#f6c400]" : "bg-transparent"}`} />
           </button>

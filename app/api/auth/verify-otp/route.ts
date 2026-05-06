@@ -127,7 +127,7 @@ export async function POST(request: Request) {
 
     response.cookies.set(
       SESSION_COOKIE_NAME,
-      createSessionToken(phone),
+      createSessionToken(phone, "user"),
       getSessionCookieOptions()
     );
 

@@ -16,13 +16,13 @@ export type AuthSession = {
   expiresAt: number;
 };
 
-export function createSessionToken(phone: string) {
+export function createSessionToken(phone: string, role?: AuthRole) {
   const now = Date.now();
   const payload: AuthSession = {
     v: 1,
     sid: randomUUID(),
     phone,
-    role: getRoleForPhone(phone),
+    role: role ?? getRoleForPhone(phone),
     issuedAt: now,
     expiresAt: now + SESSION_TTL_SECONDS * 1000,
   };
