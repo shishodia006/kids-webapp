@@ -72,6 +72,10 @@ export function PwaRegistration() {
 
         window.konnectlyRequestNotifications = async () => {
           if (!("Notification" in window)) return "denied";
+          if (Notification.permission === "granted") {
+            void savePushSubscription(registration);
+            return "granted";
+          }
           if (Notification.permission !== "default") return Notification.permission;
           const permission = await Notification.requestPermission();
           if (permission === "granted") {

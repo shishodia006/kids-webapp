@@ -13,12 +13,17 @@ export async function POST(request: Request) {
 
     if (purpose === "register") {
       const registration = body.registration && typeof body.registration === "object" ? body.registration as Record<string, unknown> : {};
-      const fullName = typeof registration.fullName === "string" ? registration.fullName.trim() : "";
+      const fatherName = typeof registration.fatherName === "string" ? registration.fatherName.trim() : "";
+      const motherName = typeof registration.motherName === "string" ? registration.motherName.trim() : "";
+      const fullName = typeof registration.fullName === "string" ? registration.fullName.trim() : [fatherName, motherName].filter(Boolean).join(" & ");
       const email = typeof registration.email === "string" ? registration.email.trim() : "";
+      const alternateMobile = normalizeIndianPhone(registration.alternateMobile);
+      const address = typeof registration.address === "string" ? registration.address.trim() : "";
       const cityArea = typeof registration.cityArea === "string" ? registration.cityArea.trim() : "";
+      const pincode = typeof registration.pincode === "string" ? registration.pincode.trim() : "";
 
-      if (!fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !cityArea) {
-        return Response.json({ message: "Please enter your full name, valid email, and city/area." }, { status: 400 });
+      if (!fatherName || !motherName || !fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !alternateMobile || !address || !cityArea || !/^\d{6}$/.test(pincode)) {
+        return Response.json({ message: "Please complete all required parent details before continuing." }, { status: 400 });
       }
 
       const emailGate = await assertEmailAvailable(email);

@@ -76,19 +76,29 @@ function normalizeParentSignup(value: unknown, phone: string) {
   }
 
   const details = value as Record<string, unknown>;
-  const fullName = clean(details.fullName);
+  const fatherName = clean(details.fatherName);
+  const motherName = clean(details.motherName);
+  const fullName = clean(details.fullName) || [fatherName, motherName].filter(Boolean).join(" & ");
   const email = clean(details.email).toLowerCase();
-  const cityArea = clean(details.cityArea);
+  const alternateMobile = normalizeIndianPhone(details.alternateMobile) ?? "";
+  const address = clean(details.address);
+  const cityArea = clean(details.cityArea) || clean(details.locality);
+  const pincode = clean(details.pincode);
 
-  if (!fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !cityArea) {
-    return { ok: false as const, message: "Please enter your full name, valid email, and city/area." };
+  if (!fatherName || !motherName || !fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !alternateMobile || !address || !cityArea || !/^\d{6}$/.test(pincode)) {
+    return { ok: false as const, message: "Please complete all required parent details before creating your account." };
   }
 
   const normalizedDetails: ParentSignupDetails = {
+    fatherName,
+    motherName,
     fullName,
     email,
     phone,
+    alternateMobile,
+    address,
     cityArea,
+    pincode,
     referralCode: clean(details.referralCode).toUpperCase(),
   };
 

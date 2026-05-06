@@ -1,20 +1,54 @@
 "use client";
 
-import { ArrowLeft, Bell, Check, Home, KeyRound, MessageCircle, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Bell, BookOpen, Check, ChevronDown, Handshake, Home, KeyRound, MessageCircle, Palette, ShieldCheck, Trophy, Volleyball, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
-type Step = "details" | "otp" | "terms" | "password" | "widget";
+type Step = "intro" | "details" | "otp" | "terms" | "password" | "widget";
 type RegisterDetails = {
+  fatherName: string;
+  motherName: string;
   fullName: string;
   phone: string;
+  alternateMobile: string;
   email: string;
+  address: string;
   cityArea: string;
+  pincode: string;
   referralCode: string;
 };
 
-const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app already installed hai. Home screen se open kijiye ya browser ke Open in app button par tap kijiye.";
+const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly is already installed. Open it from your home screen or use the browser's Open in app button.";
+const LOCALITY_OPTIONS = [
+  "DLF Phase 1",
+  "DLF Phase 2",
+  "DLF Phase 3",
+  "DLF Phase 4",
+  "DLF Phase 5",
+  "Sector 40",
+  "Sector 43",
+  "Sector 45",
+  "Sector 46",
+  "Sector 47",
+  "Sector 48",
+  "Sector 50",
+  "Sector 51",
+  "Sector 52",
+  "Sushant Lok",
+  "South City",
+  "Palam Vihar",
+  "Nirvana Country",
+  "Vatika City",
+  "Other",
+];
+const WELCOME_PILLARS: Array<{ Icon: LucideIcon; label: string }> = [
+  { Icon: Palette, label: "Skills" },
+  { Icon: Volleyball, label: "Sports" },
+  { Icon: Handshake, label: "Friends" },
+  { Icon: Trophy, label: "Rewards" },
+  { Icon: BookOpen, label: "Learning" },
+];
 
 export default function RegisterPage() {
   return (
@@ -29,12 +63,17 @@ function RegisterFlow() {
   const searchParams = useSearchParams();
   const otpRefs = useRef<Array<HTMLInputElement | null>>([]);
   const termsRef = useRef<HTMLDivElement | null>(null);
-  const [step, setStep] = useState<Step>("details");
+  const [step, setStep] = useState<Step>("intro");
   const [details, setDetails] = useState<RegisterDetails>({
+    fatherName: "",
+    motherName: "",
     fullName: "",
     phone: "",
+    alternateMobile: "",
     email: "",
+    address: "",
     cityArea: "",
+    pincode: "",
     referralCode: searchParams.get("ref")?.toUpperCase() ?? "",
   });
   const [requestId, setRequestId] = useState("");
@@ -51,6 +90,17 @@ function RegisterFlow() {
   const [now, setNow] = useState(0);
 
   const phone = details.phone.replace(/\D/g, "").slice(-10);
+  const alternatePhone = details.alternateMobile.replace(/\D/g, "").slice(-10);
+  const pincode = details.pincode.replace(/\D/g, "").slice(0, 6);
+  const parentDetailsReady =
+    phone.length === 10 &&
+    alternatePhone.length === 10 &&
+    pincode.length === 6 &&
+    Boolean(details.fatherName.trim()) &&
+    Boolean(details.motherName.trim()) &&
+    Boolean(details.email.trim()) &&
+    Boolean(details.address.trim()) &&
+    Boolean(details.cityArea.trim());
   const otpCode = otp.join("");
   const remainingSeconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const resendSeconds = Math.max(0, Math.ceil((sentAt + 30_000 - now) / 1000));
@@ -66,7 +116,22 @@ function RegisterFlow() {
   }, []);
 
   function update(key: keyof RegisterDetails, value: string) {
-    setDetails((current) => ({ ...current, [key]: key === "referralCode" ? value.toUpperCase() : value }));
+    const normalized =
+      key === "referralCode"
+        ? value.toUpperCase()
+        : key === "phone" || key === "alternateMobile"
+          ? value.replace(/\D/g, "").slice(-10)
+          : key === "pincode"
+            ? value.replace(/\D/g, "").slice(0, 6)
+            : value;
+
+    setDetails((current) => {
+      const next = { ...current, [key]: normalized };
+      if (key === "fatherName" || key === "motherName") {
+        next.fullName = [next.fatherName.trim(), next.motherName.trim()].filter(Boolean).join(" & ");
+      }
+      return next;
+    });
   }
 
   async function installAppFromWidget() {
@@ -78,8 +143,8 @@ function RegisterFlow() {
     const installed = await window.konnectlyInstallApp?.();
     setStatus(
       installed
-        ? "Konnectly app install ho gaya hai. Ab aap ise home screen se one-tap open kar sakte hain."
-        : "Install prompt abhi available nahi hai. Browser menu se Install app ya Add to Home Screen choose kijiye.",
+        ? "Konnectly has been installed. You can now open it from your home screen with one tap."
+        : "The install prompt is not available yet. Choose Install app or Add to Home Screen from your browser menu.",
     );
   }
 
@@ -229,20 +294,29 @@ function RegisterFlow() {
           <span className="flex items-center gap-1.5">IN <MessageCircle size={15} /></span>
         </div>
 
+        {step === "intro" && <WelcomeSlide onGetStarted={() => setStep("details")} />}
+
         {step === "details" && (
           <div className="min-h-0 flex-1 overflow-y-auto">
-            <Header eyebrow="Parent Sign Up" title="Create your Konnectly account" body="Start with parent details. Child profiles are added after account setup." />
+            <Header eyebrow="Step 1 of 2 - Parent Details" title="Tell us about your family" body="Start with parent details. Child profiles are added after account setup." onBack={() => setStep("intro")} />
             <form onSubmit={sendOtp} className="grid gap-3.5 px-5 py-5">
-              <Field label="Full Name" required value={details.fullName} onChange={(value) => update("fullName", value)} placeholder="Parent full name" />
-              <PhoneField value={details.phone} onChange={(value) => update("phone", value)} />
+              <Field label="Father's Full Name" required value={details.fatherName} onChange={(value) => update("fatherName", value)} placeholder="e.g. Rahul Sharma" />
+              <Field label="Mother's Full Name" required value={details.motherName} onChange={(value) => update("motherName", value)} placeholder="e.g. Priya Sharma" />
+              <PhoneField label="Primary Phone Number" value={details.phone} onChange={(value) => update("phone", value)} />
+              <PhoneField label="Alternate Number" value={details.alternateMobile} onChange={(value) => update("alternateMobile", value)} placeholder="91234 56789" />
               <Field label="Email Address" required type="email" value={details.email} onChange={(value) => update("email", value)} placeholder="parent@example.com" />
-              <Field label="City / Area" required value={details.cityArea} onChange={(value) => update("cityArea", value)} placeholder="Gurugram, Sector 50" />
-              <Field label="Referral Code" value={details.referralCode} onChange={(value) => update("referralCode", value)} placeholder="Optional" mono />
-              <PrimaryButton disabled={loading || phone.length !== 10 || !details.fullName.trim() || !details.email.trim() || !details.cityArea.trim()}>
-                {loading ? "Sending OTP..." : "Send OTP"}
+              <TextAreaField label="Home Address" required value={details.address} onChange={(value) => update("address", value)} placeholder="Flat / House No., Building, Street..." />
+              <div className="grid gap-3.5 min-[390px]:grid-cols-2">
+                <LocalitySelect value={details.cityArea} onChange={(value) => update("cityArea", value)} />
+                <Field label="Pincode" required value={details.pincode} onChange={(value) => update("pincode", value)} placeholder="122001" inputMode="numeric" maxLength={6} />
+              </div>
+              <Field label="Referred by KonnektKode" value={details.referralCode} onChange={(value) => update("referralCode", value)} placeholder="Optional" mono />
+              <PrimaryButton disabled={loading || !parentDetailsReady}>
+                {loading ? "Sending OTP..." : "Continue & Get OTP "}
               </PrimaryButton>
               <Status message={status} />
               {status.includes("Sign in instead") && <Link className="text-center text-xs font-black text-[#5f4bd3] underline" href="/login">Go to Sign In</Link>}
+              <p className="text-center text-xs font-bold leading-5 text-[#9290aa]">Your data is safe with us. We never share your information with anyone.</p>
               <p className="text-center text-[11px] font-bold text-[#9290aa]">Already have an account? <Link href="/login" className="font-black text-[#5f4bd3]">Sign In</Link></p>
             </form>
           </div>
@@ -332,7 +406,7 @@ function RegisterFlow() {
             <button type="button" onClick={() => { void installAppFromWidget(); }} className="mt-7 flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white">
               <Bell size={18} /> Add to Home Screen
             </button>
-            <button type="button" onClick={() => router.push("/app")} className="mt-3 w-full rounded-full border-2 border-[#dcd7ff] bg-white px-5 py-3 text-sm font-black text-[#5f4bd3]">
+            <button type="button" onClick={() => router.push("/app?tab=Account")} className="mt-3 w-full rounded-full border-2 border-[#dcd7ff] bg-white px-5 py-3 text-sm font-black text-[#5f4bd3]">
               Maybe Later
             </button>
           </div>
@@ -342,9 +416,60 @@ function RegisterFlow() {
   );
 }
 
-function Header({ eyebrow, title, body }: { eyebrow: string; title: string; body: string }) {
+function WelcomeSlide({ onGetStarted }: { onGetStarted: () => void }) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto bg-[#4d39b6]">
+      <section className="relative overflow-hidden px-6 pb-8 pt-8 text-center text-white">
+        <div className="absolute -right-14 top-0 h-44 w-44 rounded-full bg-white/12" />
+        <div className="absolute -left-12 bottom-0 h-36 w-36 rounded-full bg-white/10" />
+        <p className="relative text-[11px] font-black uppercase tracking-[0.24em] text-white/55"> ✨ Welcome to</p>
+        <div className="relative mx-auto mt-5 w-fit rounded-[20px] bg-white px-9 py-4 text-3xl font-black text-[#5f4bd3] shadow-xl">
+          K<span className="text-[#c99000]">onn</span>ectly
+        </div>
+        <h1 className="relative mx-auto mt-8 max-w-[340px] text-xl font-black leading-snug">
+          Your kid&apos;s journey to building <span className="text-[#f6c400]">life-ready skills</span> and lifelong friendships is about to begin!
+        </h1>
+     
+      </section>
+
+      <div className="grid grid-cols-5 gap-2 bg-[#4334a8] px-4 py-5 text-center text-[10px] font-black uppercase tracking-[0.12em] text-white/55">
+        {WELCOME_PILLARS.map(({ Icon, label }) => (
+          <div key={label} className="grid justify-items-center gap-2">
+            <span className="grid h-8 place-items-center text-[#f6c400]" aria-hidden="true"><Icon size={25} strokeWidth={2.6} /></span>
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      <section className="rounded-t-[38px] bg-[#f7f5ff] px-6 pb-8 pt-8">
+        <p className="inline-flex rounded-full bg-[#eee7ff] px-5 py-2 text-xs font-black uppercase tracking-[0.18em] text-[#5f4bd3]">New here?</p>
+        <h2 className="mt-7 text-xl font-black leading-tight text-[#2f2b55]">Create your Parent Account</h2>
+        <p className="mt-4 text-sm font-bold leading-7 text-[#9290aa]">Join thousands of families in your neighbourhood who are raising future-ready kids with Konnectly.</p>
+        <PrimaryButton className="mt-8" type="button" onClick={onGetStarted}>Get Started - It&apos;s Free! 🚀</PrimaryButton>
+        <p className="mt-5 text-center text-sm font-bold text-[#9290aa]">Already have an account? <Link href="/login" className="font-black text-[#5f4bd3]">Sign In</Link></p>
+        <div className="mt-8 grid grid-cols-3 divide-x divide-[#ddd8f5] border-t border-[#ddd8f5] pt-6 text-center">
+          <Stat value="5K+" label="Families" />
+          <Stat value="200+" label="Activities" />
+          <Stat value="50+" label="Localities" />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function Stat({ value, label }: { value: string; label: string }) {
+  return (
+    <div>
+      <p className="text-lg font-black text-[#5f4bd3]">{value}</p>
+      <p className="mt-1 text-xs font-black text-[#9290aa]">{label}</p>
+    </div>
+  );
+}
+
+function Header({ eyebrow, title, body, onBack }: { eyebrow: string; title: string; body: string; onBack?: () => void }) {
   return (
     <section className="relative overflow-hidden bg-[#5444bf] px-6 pb-7 pt-7 text-white">
+      {onBack && <button onClick={onBack} className="mb-5 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white" type="button" aria-label="Back"><ArrowLeft size={20} /></button>}
       <p className="inline-flex rounded-full bg-white/15 px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em]">{eyebrow}</p>
       <h1 className="mt-4 max-w-[310px] text-2xl font-black leading-tight">{title}</h1>
       <p className="mt-3 text-sm font-bold leading-6 text-white/75">{body}</p>
@@ -373,22 +498,66 @@ function TermsContent() {
   );
 }
 
-function Field({ label, value, onChange, placeholder, required, type = "text", mono }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean; type?: string; mono?: boolean }) {
+function Field({
+  label,
+  value,
+  onChange,
+  placeholder,
+  required,
+  type = "text",
+  mono,
+  inputMode,
+  maxLength,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+  required?: boolean;
+  type?: string;
+  mono?: boolean;
+  inputMode?: "none" | "text" | "tel" | "url" | "email" | "numeric" | "decimal" | "search";
+  maxLength?: number;
+}) {
   return (
     <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
       <span>{label} {required && <span className="text-[#e04572]">*</span>}</span>
-      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} className={`h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf] ${mono ? "font-mono uppercase tracking-[0.12em]" : ""}`} />
+      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} inputMode={inputMode} maxLength={maxLength} className={`h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf] ${mono ? "font-mono uppercase tracking-[0.12em]" : ""}`} />
     </label>
   );
 }
 
-function PhoneField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function TextAreaField({ label, value, onChange, placeholder, required }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; required?: boolean }) {
   return (
     <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
-      <span>Primary Mobile Number <span className="text-[#e04572]">*</span></span>
+      <span>{label} {required && <span className="text-[#e04572]">*</span>}</span>
+      <textarea required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} rows={3} className="min-h-[86px] resize-none rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 py-3 text-xs font-bold outline-none focus:border-[#6655cf]" />
+    </label>
+  );
+}
+
+function LocalitySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
+      <span>Locality <span className="text-[#e04572]">*</span></span>
+      <span className="relative">
+        <select required value={value} onChange={(event) => onChange(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 pr-10 text-xs font-bold outline-none focus:border-[#6655cf]">
+          <option value="">Select locality</option>
+          {LOCALITY_OPTIONS.map((locality) => <option key={locality} value={locality}>{locality}</option>)}
+        </select>
+        <ChevronDown size={17} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#9290aa]" />
+      </span>
+    </label>
+  );
+}
+
+function PhoneField({ label = "Primary Mobile Number", value, onChange, placeholder = "98765 43210" }: { label?: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
+  return (
+    <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
+      <span>{label} <span className="text-[#e04572]">*</span></span>
       <div className="grid grid-cols-[68px_minmax(0,1fr)] gap-2">
         <div className="grid h-12 place-items-center rounded-2xl border-2 border-[#e3e0f4] bg-white text-xs font-black">IN +91</div>
-        <input required value={value} onChange={(event) => onChange(event.target.value)} pattern="[0-9 ]{10,13}" placeholder="98765 43210" type="tel" className="h-12 min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]" />
+        <input required value={value} onChange={(event) => onChange(event.target.value)} pattern="[0-9 ]{10,13}" placeholder={placeholder} type="tel" className="h-12 min-w-0 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]" />
       </div>
     </label>
   );

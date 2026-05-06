@@ -5,6 +5,7 @@ import { cookies } from "next/headers";
 import { executeQuery, queryOne, queryRows, withTransaction, type DbRow } from "@/lib/db";
 import { sendWhatsAppText } from "@/lib/auth/otp";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
+import { notifyAdmins, notifyUser } from "@/lib/push-notifications";
 
 export type AppUser = {
   id: number;
@@ -105,6 +106,17 @@ export type AppRewardHistory = {
   status: string;
 };
 
+export type AppPointHistory = {
+  id: number;
+  month: string;
+  source: string;
+  points: number;
+  description: string;
+  refType: string;
+  childName: string;
+  createdAt: string;
+};
+
 export type AppData = {
   user: AppUser;
   kids: AppKid[];
@@ -116,6 +128,7 @@ export type AppData = {
   heroSlides: AppHeroSlide[];
   latestNotification: AppNotification | null;
   rewardHistory: AppRewardHistory[];
+  pointHistory: AppPointHistory[];
   showWidgetSetup: boolean;
   razorpayKeyId: string;
   referralUrl: string;
@@ -129,8 +142,12 @@ type BrandRow = DbRow & Record<string, unknown>;
 type NotificationRow = DbRow & Record<string, unknown>;
 type HeroSlideRow = DbRow & Record<string, unknown>;
 type RewardHistoryRow = DbRow & Record<string, unknown>;
+type PointHistoryRow = DbRow & Record<string, unknown>;
 
 let productSchemaReady: Promise<void> | null = null;
+let expireIssuedVouchersReady: Promise<void> | null = null;
+let expireIssuedVouchersLastRun = 0;
+const EXPIRE_ISSUED_VOUCHERS_INTERVAL_MS = 60_000;
 
 export async function getCurrentSession() {
   const cookieStore = await cookies();
@@ -149,12 +166,14 @@ export async function requireCurrentUser() {
 
 export async function getAppData(origin = ""): Promise<AppData> {
   const user = await requireCurrentUser();
+  await ensureProductSchemaOnce();
+  await expireIssuedVouchers();
   const cookieStore = await cookies();
   const seenNotifId = Number(cookieStore.get("konnectly_seen_notif")?.value || 0);
 
-  const [kids, events, bookings, brands, notifications, heroSlides, rewardHistory] = await Promise.all([
+  const [kids, events, bookings, brands, notifications, heroSlides, rewardHistory, pointHistory] = await Promise.all([
     queryRows<KidRow>("SELECT * FROM kids WHERE parent_id = ? ORDER BY id ASC", [user.id]).then((rows) => rows.map(mapKid)),
-    safeRows<EventRow>("SELECT * FROM events ORDER BY event_date ASC, created_at DESC LIMIT 50").then((rows) => rows.map(mapEvent)),
+    safeRows<EventRow>("SELECT * FROM events WHERE COALESCE(is_active, true) = true ORDER BY event_date ASC, created_at DESC LIMIT 50").then((rows) => rows.map(mapEvent)),
     safeRows<BookingRow>(
       `SELECT b.*, k.child_name, e.title AS event_title, e.event_date, e.location
        FROM bookings b
@@ -175,6 +194,15 @@ export async function getAppData(origin = ""): Promise<AppData> {
        ORDER BY r.created_at DESC`,
       [user.id],
     ).then((rows) => rows.map(mapRewardHistory)),
+    safeRows<PointHistoryRow>(
+      `SELECT pl.*, k.child_name
+       FROM point_ledger pl
+       LEFT JOIN kids k ON k.id = pl.kid_id
+       WHERE pl.user_id = ?
+       ORDER BY pl.created_at DESC
+       LIMIT 120`,
+      [user.id],
+    ).then((rows) => rows.map(mapPointHistory)),
   ]);
 
   let activeKidId = Number(cookieStore.get("konnectly_active_kid_id")?.value || 0);
@@ -194,6 +222,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
     heroSlides,
     latestNotification,
     rewardHistory,
+    pointHistory,
     showWidgetSetup: cookieStore.get("konnectly_show_widget_setup")?.value === "1",
     razorpayKeyId: process.env.RAZORPAY_KEY_ID ?? "",
     referralUrl: `${origin}/register?ref=${encodeURIComponent(referralCode)}`,
@@ -244,6 +273,18 @@ export async function addChildProfile(input: Record<string, unknown>) {
     user.mobile,
     `${childName}'s profile is currently under verification. You'll be notified once it's approved. Meanwhile, explore upcoming events for your child!`,
   );
+  await notifyUser(user.id, {
+    title: "Child profile submitted",
+    body: `${childName}'s profile is pending admin review.`,
+    url: "/app?tab=Account",
+    tag: `kid-submitted-${kidId || childName}`,
+  });
+  await notifyAdmins({
+    title: "New child profile pending",
+    body: `${childName} was added by ${user.parentName || "a parent"}.`,
+    url: "/admin",
+    tag: `admin-kid-pending-${kidId || Date.now()}`,
+  });
 
   return { message: `${childName}'s profile is currently under verification.` };
 }
@@ -287,6 +328,19 @@ export async function updateParentProfile(input: Record<string, unknown>) {
     [parentName, email || null, fatherName || null, motherName || null, alternateMobile || null, profession || null, address || null, locality || null, city || null, state || null, pincode || null, user.id],
   );
 
+  await notifyUser(user.id, {
+    title: "Profile updated",
+    body: "Your parent profile details were updated successfully.",
+    url: "/app?tab=Account",
+    tag: `parent-profile-${user.id}`,
+  });
+  await notifyAdmins({
+    title: "Parent profile updated",
+    body: `${parentName} updated their parent profile.`,
+    url: "/admin",
+    tag: `admin-parent-profile-${user.id}`,
+  });
+
   return { message: "Parent profile updated." };
 }
 
@@ -319,6 +373,19 @@ export async function updateChildProfile(input: Record<string, unknown>) {
   );
 
   if (!result.affectedRows) throw new Error("Kid profile not found.");
+  await notifyUser(user.id, {
+    title: "Kid profile updated",
+    body: `${childName}'s profile details were updated.`,
+    url: "/app?tab=Account",
+    tag: `kid-profile-${kidId}`,
+  });
+  await notifyAdmins({
+    title: "Kid profile updated",
+    body: `${childName}'s profile was updated by ${user.parentName || "a parent"}.`,
+    url: "/admin",
+    tag: `admin-kid-profile-${kidId}`,
+  });
+
   return { message: "Kid profile updated." };
 }
 
@@ -378,7 +445,7 @@ export async function redeemBrand(brandId: number) {
 
   const coupon = `KON-${mappedBrand.name.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase() || "RWD"}-${randomBytes(3).toString("hex").toUpperCase()}`;
   const qrCode = `QR-${coupon}`;
-  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 30);
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 15);
 
   await withTransaction(async (connection) => {
     await connection.execute("UPDATE users SET konnect_points = konnect_points - ? WHERE id = ?", [mappedBrand.pointsCost, user.id]);
@@ -389,8 +456,8 @@ export async function redeemBrand(brandId: number) {
       );
     } catch {
       await connection.execute(
-        "INSERT INTO redemptions (kid_id, brand_name, points_spent, coupon_code, status) VALUES (?, ?, ?, ?, 'issued')",
-        [mappedKid.id, mappedBrand.name, mappedBrand.pointsCost, coupon],
+        "INSERT INTO redemptions (kid_id, brand_name, points_spent, coupon_code, qr_code, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, 'issued')",
+        [mappedKid.id, mappedBrand.name, mappedBrand.pointsCost, coupon, qrCode, expiresAt],
       );
     }
     await connection.execute(
@@ -400,6 +467,18 @@ export async function redeemBrand(brandId: number) {
   });
 
   await sendWhatsAppText(user.mobile, `Your ${mappedBrand.name} voucher has been generated! Use code ${coupon} or show the QR code at the outlet. Valid until ${formatDate(expiresAt.toISOString())}.`);
+  await notifyUser(user.id, {
+    title: "Voucher generated",
+    body: `${mappedBrand.name} voucher ${coupon} is ready.`,
+    url: "/app?tab=Account",
+    tag: `voucher-${coupon}`,
+  });
+  await notifyAdmins({
+    title: "Voucher issued",
+    body: `${user.parentName || "A parent"} redeemed ${mappedBrand.name} for ${mappedBrand.pointsCost} points.`,
+    url: "/admin",
+    tag: `admin-voucher-${coupon}`,
+  });
 
   return { coupon, brandName: mappedBrand.name, qrCode, expiresAt: expiresAt.toISOString() };
 }
@@ -460,6 +539,19 @@ export async function confirmBooking({ eventId, kidIds, amount, razorpayPaymentI
     );
   }
 
+  await notifyUser(user.id, {
+    title: "Activity booked",
+    body: `${mappedEvent.title} pass issued. +${pointsOnPurchase} Konnect Points added.`,
+    url: "/app?tab=Activities",
+    tag: `booking-${eventId}-${lastQr}`,
+  });
+  await notifyAdmins({
+    title: "New activity booking",
+    body: `${user.parentName || "A parent"} booked ${mappedEvent.title} for ${cleanKidIds.length} kid${cleanKidIds.length === 1 ? "" : "s"}.`,
+    url: "/admin",
+    tag: `admin-booking-${eventId}-${Date.now()}`,
+  });
+
   return { message: `Passes issued! +${pointsOnPurchase} Konnect pts added.` };
 }
 
@@ -517,8 +609,22 @@ function mapRewardHistory(row: RewardHistoryRow): AppRewardHistory {
     voucherCode: str(row.coupon_code),
     qrCode: str(row.qr_code),
     expiresAt: dateStr(row.expires_at),
-    redeemedAt: createdAt,
+    redeemedAt: dateStr(row.redeemed_at),
     status: str(row.status) || "issued",
+  };
+}
+
+function mapPointHistory(row: PointHistoryRow): AppPointHistory {
+  const createdAt = dateStr(row.created_at);
+  return {
+    id: num(row.id),
+    month: formatMonth(createdAt),
+    source: str(row.source),
+    points: num(row.points),
+    description: str(row.description),
+    refType: str(row.ref_type),
+    childName: str(row.child_name),
+    createdAt,
   };
 }
 
@@ -649,12 +755,15 @@ async function ensureProductSchema() {
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS restricted_area VARCHAR(190)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS points_earnable INTEGER NOT NULL DEFAULT 100");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS image TEXT");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true");
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS backup_code VARCHAR(40)");
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS points_total INTEGER NOT NULL DEFAULT 100");
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS points_awarded_on_payment INTEGER NOT NULL DEFAULT 50");
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS points_awarded_on_attendance INTEGER NOT NULL DEFAULT 0");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS qr_code VARCHAR(255)");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
+  await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS redeemed_at TIMESTAMPTZ");
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS hero_slides (
       id SERIAL PRIMARY KEY,
@@ -693,6 +802,27 @@ async function ensureProductSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+}
+
+async function expireIssuedVouchers() {
+  const now = Date.now();
+  if (expireIssuedVouchersReady) {
+    await expireIssuedVouchersReady;
+    return;
+  }
+  if (now - expireIssuedVouchersLastRun < EXPIRE_ISSUED_VOUCHERS_INTERVAL_MS) return;
+
+  expireIssuedVouchersLastRun = now;
+  expireIssuedVouchersReady = executeQuery("UPDATE redemptions SET status = 'expired' WHERE status = 'issued' AND expires_at IS NOT NULL AND expires_at < NOW()")
+    .then(() => undefined)
+    .catch((error) => {
+      expireIssuedVouchersLastRun = 0;
+      throw error;
+    })
+    .finally(() => {
+      expireIssuedVouchersReady = null;
+    });
+  await expireIssuedVouchersReady;
 }
 
 async function ensureProductSchemaOnce() {

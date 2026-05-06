@@ -17,9 +17,12 @@ import {
   Bell,
   CalendarDays,
   Check,
+  ChevronDown,
   CirclePlus,
   Gift,
+  Grid2X2,
   Link,
+  List,
   Loader2,
   LogOut,
   Megaphone,
@@ -33,12 +36,21 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 const ADMIN_FONT_STYLE = { fontFamily: "'Nunito', sans-serif" };
 
 type Section = "Memberships" | "Activities" | "Promotions & Updates" | "Business" | "Referral Dashboard";
 type Modal = "brand" | "notification" | "referral-settings" | null;
+type MembershipAgeFilter = "all" | "4-6" | "7-9" | "10-12" | "12-18";
+type MembershipPointsFilter = "all" | "0-200" | "200-500" | "500+";
+type MembershipViewMode = "grid" | "list";
+
+declare global {
+  interface Window {
+    konnectlyRequestNotifications?: () => Promise<NotificationPermission>;
+  }
+}
 
 const navItems: { section: Section | "Analytics" | "Settings"; icon: ReactNode; group: "main" | "system" }[] = [
   { section: "Memberships", icon: <Users size={21} />, group: "main" },
@@ -50,13 +62,30 @@ const navItems: { section: Section | "Analytics" | "Settings"; icon: ReactNode; 
   { section: "Settings", icon: <Settings size={21} />, group: "system" },
 ];
 
+const membershipAgeOptions: Array<{ value: MembershipAgeFilter; label: string }> = [
+  { value: "all", label: "All Ages" },
+  { value: "4-6", label: "4-6 years" },
+  { value: "7-9", label: "7-9 years" },
+  { value: "10-12", label: "10-12 years" },
+  { value: "12-18", label: "12-18 years" },
+];
+
+const membershipPointsOptions: Array<{ value: MembershipPointsFilter; label: string }> = [
+  { value: "all", label: "All Points" },
+  { value: "0-200", label: "0-200 pts" },
+  { value: "200-500", label: "200-500 pts" },
+  { value: "500+", label: "500+ pts" },
+];
+
 export default function AdminPage() {
   const [activeSection, setActiveSection] = useState<Section>("Memberships");
   const [data, setData] = useState<AdminData | null>(null);
   const [status, setStatus] = useState("Loading live admin dashboard...");
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
+  const [editingBrand, setEditingBrand] = useState<AdminBrand | null>(null);
   const [comingSoon, setComingSoon] = useState<"Analytics" | "Settings" | null>(null);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
 
   async function loadData() {
     try {
@@ -78,6 +107,13 @@ export default function AdminPage() {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       void loadData();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setNotificationPermission("Notification" in window ? Notification.permission : "unsupported");
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -108,6 +144,18 @@ export default function AdminPage() {
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/admin-login";
+  }
+
+  async function enableAdminNotifications() {
+    if (!("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      setStatus("Notifications are not supported on this browser.");
+      return;
+    }
+
+    const permission = window.konnectlyRequestNotifications ? await window.konnectlyRequestNotifications() : await Notification.requestPermission();
+    setNotificationPermission(permission);
+    setStatus(permission === "granted" ? "Admin notifications enabled." : "Notifications are blocked or not allowed yet.");
   }
 
   const counts = {
@@ -151,7 +199,16 @@ export default function AdminPage() {
         </aside>
 
         <section className="min-w-0 lg:ml-[240px]">
-          <DashboardHeader section={activeSection} loading={busy} onRefresh={loadData} onAddBrand={() => setModal("brand")} onPostUpdate={() => setModal("notification")} onReferralSettings={() => setModal("referral-settings")} />
+          <DashboardHeader
+            section={activeSection}
+            loading={busy}
+            notificationPermission={notificationPermission}
+            onRefresh={loadData}
+            onEnableNotifications={enableAdminNotifications}
+            onAddBrand={() => setModal("brand")}
+            onPostUpdate={() => setModal("notification")}
+            onReferralSettings={() => setModal("referral-settings")}
+          />
           <div className="min-w-0 px-4 py-5 sm:px-6 lg:px-8 lg:pt-[98px]">
             {status && <StatusBanner message={status} loading={busy || status.startsWith("Loading")} />}
             {!data && !status && <StatusBanner message="No admin data loaded yet." />}
@@ -168,6 +225,7 @@ export default function AdminPage() {
                 data={data}
                 onCreateEvent={(body) => runAction("Saving activity...", () => postJson("/api/admin/events", body))}
                 onUpdateEvent={(eventId, body) => runAction("Updating activity...", () => requestJson("/api/admin/events", { method: "PATCH", body: { ...body, eventId } }))}
+                onDeleteEvent={(eventId) => runAction("Deleting activity...", () => requestJson("/api/admin/events", { method: "DELETE", body: { eventId } }))}
                 onCheckIn={(bookingId) => runAction("Checking in participant and awarding points...", () => postJson("/api/admin/bookings/check-in", { bookingId }))}
               />
             )}
@@ -176,6 +234,8 @@ export default function AdminPage() {
                 data={data}
                 onPostUpdate={() => setModal("notification")}
                 onCreateHeroSlide={(body) => runAction("Adding hero slide...", () => postJson("/api/admin/hero-slides", body))}
+                onUpdateHeroSlide={(slideId, body) => runAction("Updating hero slide...", () => requestJson("/api/admin/hero-slides", { method: "PATCH", body: { ...body, slideId } }))}
+                onDeleteHeroSlide={(slideId) => runAction("Removing hero slide...", () => requestJson("/api/admin/hero-slides", { method: "DELETE", body: { slideId } }))}
               />
             )}
             {data && activeSection === "Business" && (
@@ -185,6 +245,11 @@ export default function AdminPage() {
                 onBrandStatus={(brandId, active) =>
                   runAction(`${active ? "Enabling" : "Disabling"} brand...`, () => requestJson("/api/admin/brands", { method: "PATCH", body: { brandId, active } }))
                 }
+                onEditBrand={setEditingBrand}
+                onRemoveBrand={(brand) => {
+                  if (!window.confirm(`Remove ${brand.name}? Existing issued vouchers will stay in history.`)) return;
+                  void runAction("Removing reward brand...", () => requestJson("/api/admin/brands", { method: "DELETE", body: { brandId: brand.id } }));
+                }}
                 onRedemptionStatus={(redemptionId, nextStatus) =>
                   runAction("Updating voucher status...", () => postJson("/api/admin/redemptions/status", { redemptionId, status: nextStatus }))
                 }
@@ -196,6 +261,13 @@ export default function AdminPage() {
       </div>
 
       {modal === "brand" && <BrandModal onClose={() => setModal(null)} onSubmit={(body) => runAction("Adding reward brand...", () => postJson("/api/admin/brands", body)).then(() => setModal(null))} />}
+      {editingBrand && (
+        <BrandModal
+          brand={editingBrand}
+          onClose={() => setEditingBrand(null)}
+          onSubmit={(body) => runAction("Updating reward brand...", () => requestJson("/api/admin/brands", { method: "PATCH", body: { ...body, brandId: editingBrand.id } })).then(() => setEditingBrand(null))}
+        />
+      )}
       {modal === "notification" && <NotificationModal onClose={() => setModal(null)} onSubmit={(body) => runAction("Publishing update...", () => postJson("/api/admin/notifications", body)).then(() => setModal(null))} />}
       {modal === "referral-settings" && <ReferralSettingsModal onClose={() => setModal(null)} />}
       {comingSoon && <ComingSoonModal title={comingSoon} onClose={() => setComingSoon(null)} />}
@@ -206,14 +278,18 @@ export default function AdminPage() {
 function DashboardHeader({
   section,
   loading,
+  notificationPermission,
   onRefresh,
+  onEnableNotifications,
   onAddBrand,
   onPostUpdate,
   onReferralSettings,
 }: {
   section: Section;
   loading: boolean;
+  notificationPermission: NotificationPermission | "unsupported";
   onRefresh: () => void;
+  onEnableNotifications: () => void;
   onAddBrand: () => void;
   onPostUpdate: () => void;
   onReferralSettings: () => void;
@@ -234,6 +310,7 @@ function DashboardHeader({
           <p className="mt-1 text-xs font-semibold text-[#8f8ba6] sm:text-sm">{copy[section]}</p>
         </div>
         <div className="flex flex-wrap gap-3">
+          {notificationPermission !== "granted" && notificationPermission !== "unsupported" && <PillButton icon={<Bell size={17} />} label="Enable Alerts" muted onClick={onEnableNotifications} />}
           <PillButton icon={<RefreshCw size={17} className={loading ? "animate-spin" : ""} />} label="Refresh" muted onClick={onRefresh} />
           {section === "Business" && <PillButton icon={<CirclePlus size={18} />} label="Add Brand" onClick={onAddBrand} />}
           {section === "Promotions & Updates" && <PillButton icon={<CirclePlus size={18} />} label="Post Update" onClick={onPostUpdate} />}
@@ -246,6 +323,28 @@ function DashboardHeader({
 
 function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kidId: number, status: "approved" | "rejected") => void }) {
   const [membershipTab, setMembershipTab] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [ageFilter, setAgeFilter] = useState<MembershipAgeFilter>("all");
+  const [schoolFilter, setSchoolFilter] = useState("all");
+  const [localityFilter, setLocalityFilter] = useState("all");
+  const [pointsFilter, setPointsFilter] = useState<MembershipPointsFilter>("all");
+  const [viewMode, setViewMode] = useState<MembershipViewMode>("grid");
+  const schoolOptions = useMemo(() => uniqueKidValues(data.members, "school"), [data.members]);
+  const localityOptions = useMemo(() => uniqueKidValues(data.members, "locality"), [data.members]);
+  const filteredMembers = useMemo(
+    () => filterMembers(data.members, { searchTerm, ageFilter, schoolFilter, localityFilter, pointsFilter }),
+    [ageFilter, data.members, localityFilter, pointsFilter, schoolFilter, searchTerm],
+  );
+  const filtersActive = Boolean(searchTerm.trim()) || ageFilter !== "all" || schoolFilter !== "all" || localityFilter !== "all" || pointsFilter !== "all";
+  const visibleKids = filteredMembers.reduce((total, member) => total + member.kids.length, 0);
+
+  function clearFilters() {
+    setSearchTerm("");
+    setAgeFilter("all");
+    setSchoolFilter("all");
+    setLocalityFilter("all");
+    setPointsFilter("all");
+  }
 
   return (
     <div className="space-y-5">
@@ -256,12 +355,43 @@ function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kid
         <StatCard title="Paid Bookings" value={data.stats.paidBookings.toString()} note={`${data.stats.checkedIn} checked in`} tone="dark" />
       </div>
 
-      <SegmentedTabs tabs={["Active Memberships", "Pending Approvals"]} activeIndex={membershipTab} badges={[data.members.length, data.pendingKids.length]} onSelect={setMembershipTab} />
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <SegmentedTabs tabs={["Active Memberships", "Pending Approvals"]} activeIndex={membershipTab} badges={[data.members.length, data.pendingKids.length]} onSelect={setMembershipTab} />
+        {membershipTab === 0 && <MembershipViewToggle viewMode={viewMode} onViewMode={setViewMode} />}
+      </div>
 
       {membershipTab === 0 ? (
         <div className="space-y-4">
-          <SearchBox placeholder="Search by name, phone, Konnect code" />
-          {data.members.length === 0 ? <EmptyState text="No parent members found." /> : data.members.map((member) => <MemberCard key={member.id} member={member} />)}
+          <MembershipFilterBar
+            searchTerm={searchTerm}
+            ageFilter={ageFilter}
+            schoolFilter={schoolFilter}
+            localityFilter={localityFilter}
+            pointsFilter={pointsFilter}
+            schools={schoolOptions}
+            localities={localityOptions}
+            onSearch={setSearchTerm}
+            onAgeFilter={setAgeFilter}
+            onSchoolFilter={setSchoolFilter}
+            onLocalityFilter={setLocalityFilter}
+            onPointsFilter={setPointsFilter}
+          />
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs font-black text-[#8f8ba6]">
+              Showing {filteredMembers.length} of {data.members.length} families
+              <span className="ml-1 text-[#5b45d1]">({visibleKids} kids)</span>
+            </p>
+            {filtersActive && <SmallButton label="Clear Filters" onClick={clearFilters} />}
+          </div>
+          {data.members.length === 0 ? (
+            <EmptyState text="No parent members found." />
+          ) : filteredMembers.length === 0 ? (
+            <EmptyState text="No memberships match these filters." />
+          ) : (
+            <div className={viewMode === "grid" ? "grid gap-4 2xl:grid-cols-2" : "space-y-4"}>
+              {filteredMembers.map((member) => <MemberCard key={member.id} member={member} />)}
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4">
@@ -273,6 +403,205 @@ function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kid
       )}
     </div>
   );
+}
+
+function MembershipFilterBar({
+  searchTerm,
+  ageFilter,
+  schoolFilter,
+  localityFilter,
+  pointsFilter,
+  schools,
+  localities,
+  onSearch,
+  onAgeFilter,
+  onSchoolFilter,
+  onLocalityFilter,
+  onPointsFilter,
+}: {
+  searchTerm: string;
+  ageFilter: MembershipAgeFilter;
+  schoolFilter: string;
+  localityFilter: string;
+  pointsFilter: MembershipPointsFilter;
+  schools: string[];
+  localities: string[];
+  onSearch: (value: string) => void;
+  onAgeFilter: (value: MembershipAgeFilter) => void;
+  onSchoolFilter: (value: string) => void;
+  onLocalityFilter: (value: string) => void;
+  onPointsFilter: (value: MembershipPointsFilter) => void;
+}) {
+  return (
+    <div className="grid min-w-0 gap-3 xl:grid-cols-[minmax(220px,1.45fr)_minmax(140px,0.7fr)_minmax(180px,1fr)_minmax(180px,1fr)_minmax(140px,0.7fr)] xl:items-center">
+      <SearchBox placeholder="Search by name, phone, Konnect code" value={searchTerm} onChange={onSearch} />
+      <FilterSelect
+        ariaLabel="Filter memberships by age"
+        value={ageFilter}
+        options={membershipAgeOptions}
+        onChange={(value) => onAgeFilter(value as MembershipAgeFilter)}
+      />
+      <FilterSelect
+        ariaLabel="Filter memberships by school"
+        value={schoolFilter}
+        options={[{ value: "all", label: "All Schools" }, ...schools.map((school) => ({ value: school, label: school }))]}
+        onChange={onSchoolFilter}
+      />
+      <FilterSelect
+        ariaLabel="Filter memberships by locality"
+        value={localityFilter}
+        options={[{ value: "all", label: "All Localities" }, ...localities.map((locality) => ({ value: locality, label: locality }))]}
+        onChange={onLocalityFilter}
+      />
+      <FilterSelect
+        ariaLabel="Filter memberships by points"
+        value={pointsFilter}
+        options={membershipPointsOptions}
+        onChange={(value) => onPointsFilter(value as MembershipPointsFilter)}
+      />
+    </div>
+  );
+}
+
+function MembershipViewToggle({ viewMode, onViewMode }: { viewMode: MembershipViewMode; onViewMode: (value: MembershipViewMode) => void }) {
+  return (
+    <div className="grid w-fit grid-cols-2 gap-1 rounded-2xl border border-[#e7e1fb] bg-white p-1 shadow-sm">
+      <MembershipViewButton label="Grid view" active={viewMode === "grid"} onClick={() => onViewMode("grid")} icon={<Grid2X2 size={18} />} />
+      <MembershipViewButton label="List view" active={viewMode === "list"} onClick={() => onViewMode("list")} icon={<List size={19} />} />
+    </div>
+  );
+}
+
+function FilterSelect({
+  ariaLabel,
+  value,
+  options,
+  onChange,
+}: {
+  ariaLabel: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="relative block min-w-0">
+      <select
+        aria-label={ariaLabel}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-12 w-full min-w-0 appearance-none rounded-2xl border border-[#e7e1fb] bg-white py-2 pl-4 pr-10 text-sm font-black text-[#161332] shadow-sm outline-none transition focus:border-[#604bd1] focus:ring-2 focus:ring-[#604bd1]/15"
+      >
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <ChevronDown size={18} className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-[#161332]" />
+    </label>
+  );
+}
+
+function MembershipViewButton({ label, active, icon, onClick }: { label: string; active: boolean; icon: ReactNode; onClick: () => void }) {
+  return (
+    <button
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={`grid h-10 w-10 place-items-center rounded-xl transition ${
+        active ? "bg-[#604bd1] text-white shadow-lg shadow-[#604bd1]/20" : "bg-transparent text-[#8f8ba6] hover:bg-[#f6f3ff] hover:text-[#5b45d1]"
+      }`}
+      type="button"
+    >
+      {icon}
+    </button>
+  );
+}
+
+function filterMembers(
+  members: AdminMember[],
+  filters: {
+    searchTerm: string;
+    ageFilter: MembershipAgeFilter;
+    schoolFilter: string;
+    localityFilter: string;
+    pointsFilter: MembershipPointsFilter;
+  },
+) {
+  const hasProfileFilters = filters.ageFilter !== "all" || filters.schoolFilter !== "all" || filters.localityFilter !== "all" || filters.pointsFilter !== "all";
+  return members.flatMap((member) => {
+    const parentMatchesSearch = matchesSearch(
+      [member.family, member.father, member.mother, member.fatherPhone, member.motherPhone, member.address, member.code],
+      filters.searchTerm,
+    );
+    const matchingKids = member.kids.filter((kid) => {
+      if (!kidMatchesMembershipFilters(kid, filters)) return false;
+      if (!filters.searchTerm.trim() || parentMatchesSearch) return true;
+      return matchesSearch([kid.name, kid.school, kid.locality, kid.grade, kid.phone, kid.parent], filters.searchTerm);
+    });
+
+    if (!hasProfileFilters && (!filters.searchTerm.trim() || parentMatchesSearch)) return [{ ...member, kids: member.kids }];
+    if (matchingKids.length > 0) return [{ ...member, kids: matchingKids }];
+    return [];
+  });
+}
+
+function kidMatchesMembershipFilters(
+  kid: AdminKid,
+  filters: {
+    ageFilter: MembershipAgeFilter;
+    schoolFilter: string;
+    localityFilter: string;
+    pointsFilter: MembershipPointsFilter;
+  },
+) {
+  if (!matchesAgeFilter(parseKidAge(kid.age), filters.ageFilter)) return false;
+  if (filters.schoolFilter !== "all" && kid.school.trim() !== filters.schoolFilter) return false;
+  if (filters.localityFilter !== "all" && kid.locality.trim() !== filters.localityFilter) return false;
+  return matchesPointsFilter(kid.points, filters.pointsFilter);
+}
+
+function matchesAgeFilter(age: number, filter: MembershipAgeFilter) {
+  if (filter === "all") return true;
+  if (filter === "4-6") return age >= 4 && age <= 6;
+  if (filter === "7-9") return age >= 7 && age <= 9;
+  if (filter === "10-12") return age >= 10 && age <= 12;
+  return age >= 12 && age <= 18;
+}
+
+function matchesPointsFilter(points: number, filter: MembershipPointsFilter) {
+  if (filter === "all") return true;
+  if (filter === "0-200") return points >= 0 && points <= 200;
+  if (filter === "200-500") return points >= 200 && points <= 500;
+  return points >= 500;
+}
+
+function parseKidAge(age: string) {
+  return Number(age.match(/\d+/)?.[0] ?? 0);
+}
+
+function uniqueKidValues(members: AdminMember[], key: "school" | "locality") {
+  return Array.from(
+    new Set(
+      members.flatMap((member) =>
+        member.kids
+          .map((kid) => kid[key].trim())
+          .filter((value) => value && value !== "-"),
+      ),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function matchesSearch(values: string[], searchTerm: string) {
+  const query = normalizeSearch(searchTerm);
+  if (!query) return true;
+  const haystack = normalizeSearch(values.join(" "));
+  const compactQuery = compactSearch(query);
+  return haystack.includes(query) || Boolean(compactQuery && compactSearch(haystack).includes(compactQuery));
+}
+
+function normalizeSearch(value: string) {
+  return value.toLowerCase().trim();
+}
+
+function compactSearch(value: string) {
+  return value.replace(/[^a-z0-9]/g, "");
 }
 
 function PendingApprovals({ kids, onKidStatus }: { kids: AdminKid[]; onKidStatus: (kidId: number, status: "approved" | "rejected") => void }) {
@@ -402,33 +731,44 @@ function Activities({
   data,
   onCreateEvent,
   onUpdateEvent,
+  onDeleteEvent,
   onCheckIn,
 }: {
   data: AdminData;
-  onCreateEvent: (body: Record<string, FormDataEntryValue>) => void;
-  onUpdateEvent: (eventId: number, body: Record<string, FormDataEntryValue>) => void;
+  onCreateEvent: (body: Record<string, unknown>) => void;
+  onUpdateEvent: (eventId: number, body: Record<string, unknown>) => void;
+  onDeleteEvent: (eventId: number) => void;
   onCheckIn: (bookingId: number) => void;
 }) {
   const [activityTab, setActivityTab] = useState(0);
   const [editingEvent, setEditingEvent] = useState<AdminEvent | null>(null);
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const body = Object.fromEntries(new FormData(event.currentTarget));
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const body = Object.fromEntries(form) as Record<string, unknown>;
+    body.image = await fileToDataUrl(form.get("image"));
     if (editingEvent) {
       onUpdateEvent(editingEvent.id, body);
       setEditingEvent(null);
     } else {
       onCreateEvent(body);
     }
-    event.currentTarget.reset();
+    formElement.reset();
+  }
+
+  function deleteEvent(event: AdminEvent) {
+    if (!window.confirm(`Delete ${event.title}? It will be removed from the user app.`)) return;
+    onDeleteEvent(event.id);
+    if (editingEvent?.id === event.id) setEditingEvent(null);
   }
 
   return (
     <div className="space-y-5">
       <SegmentedTabs tabs={["Add / Edit Event", "Live Event Status"]} activeIndex={activityTab} onSelect={setActivityTab} />
       {activityTab === 0 ? (
-        <div className="grid gap-5 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="space-y-5">
           <Panel>
             <div className="flex items-center justify-between gap-3">
               <h2 className="text-lg font-black sm:text-xl">{editingEvent ? "Edit Activity" : "Create New Activity"}</h2>
@@ -436,7 +776,7 @@ function Activities({
             </div>
             <ActivityForm key={editingEvent?.id ?? "new"} event={editingEvent} onSubmit={submit} />
           </Panel>
-          <EventList events={data.events} onEdit={setEditingEvent} />
+          <EventList events={data.events} participants={data.liveParticipants} onEdit={setEditingEvent} onDelete={deleteEvent} />
         </div>
       ) : (
         <LiveEventStatus data={data} onCheckIn={onCheckIn} />
@@ -456,6 +796,13 @@ function ActivityForm({ event, onSubmit }: { event: AdminEvent | null; onSubmit:
       <Field name="pointsEarnable" label="Konnect Points Earned" type="number" min="0" defaultValue={event?.pointsEarnable ?? 100} />
       <Field name="capacity" label="Max Participants" type="number" min="1" placeholder="Leave blank for unlimited" defaultValue={event?.capacity || ""} />
       <SelectField name="category" label="Category" options={["Explore", "Engage", "Experience", "Arts & Crafts", "Sports"]} defaultValue={event?.category ?? "Experience"} />
+      <FileField name="image" label="Event Image / Banner" />
+      {event?.image && (
+        <div className="grid gap-2">
+          <span className="text-xs font-black">Current Banner</span>
+          <img src={event.image} alt={`${event.title} banner`} className="h-32 w-full rounded-2xl object-cover ring-2 ring-[#ddd6fb]" />
+        </div>
+      )}
       <Field name="minAge" label="Min Age" type="number" min="0" defaultValue={event?.minAge || ""} />
       <Field name="maxAge" label="Max Age" type="number" min="0" defaultValue={event?.maxAge || ""} />
       <SelectField name="gender" label="Gender" options={["All", "Boy", "Girl"]} defaultValue={event?.gender ?? "All"} />
@@ -471,43 +818,118 @@ function ActivityForm({ event, onSubmit }: { event: AdminEvent | null; onSubmit:
   );
 }
 
-function EventList({ events, onEdit }: { events: AdminEvent[]; onEdit: (event: AdminEvent) => void }) {
+function EventList({
+  events,
+  participants,
+  onEdit,
+  onDelete,
+}: {
+  events: AdminEvent[];
+  participants: AdminData["liveParticipants"];
+  onEdit: (event: AdminEvent) => void;
+  onDelete: (event: AdminEvent) => void;
+}) {
+  const registeredCounts = participants.reduce<Record<number, number>>((acc, participant) => {
+    acc[participant.eventId] = (acc[participant.eventId] ?? 0) + 1;
+    return acc;
+  }, {});
+
   return (
-    <Panel>
-      <h2 className="text-lg font-black sm:text-xl">Published Activities</h2>
-      <div className="mt-4 grid gap-3">
-        {events.length === 0 && <EmptyState text="No events created yet. Add one and it will appear in the user app." />}
-        {events.map((event) => (
-          <div key={event.id} className="rounded-2xl bg-[#f5f2ff] p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="font-black">{event.title}</h3>
-                <p className="mt-1 text-xs font-bold text-[#8f8ba6]">{event.date} - {event.venue || "Venue TBA"}</p>
-                <p className="mt-2 text-xs font-black text-[#5b45d1]">{event.category} - Rs {event.price} - Capacity {event.capacity || "Open"}</p>
-              </div>
-              <div className="flex shrink-0 flex-wrap gap-2">
-                <Badge tone="green">Live in app</Badge>
-                <SmallButton label="Edit" onClick={() => onEdit(event)} />
-              </div>
-            </div>
-            {event.description && <p className="mt-3 text-sm font-semibold text-[#8f8ba6]">{event.description}</p>}
-          </div>
-        ))}
-      </div>
-    </Panel>
+    <section className="space-y-4">
+      <h2 className="text-xl font-black text-[#161332]">Existing Activities</h2>
+      <Panel className="overflow-x-auto p-0">
+        <table className="w-full min-w-[980px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-[#ddd6fb] bg-[#f5f2ff] text-xs uppercase tracking-[0.2em] text-[#8f8ba6]">
+              {["Activity", "Date", "Venue", "Fee", "Points", "Registered", "Actions"].map((head) => (
+                <th key={head} className="px-5 py-4 font-black">{head}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {events.length === 0 && (
+              <tr>
+                <td className="px-5 py-8 text-center font-black text-[#8f8ba6]" colSpan={7}>No events created yet. Add one and it will appear in the user app.</td>
+              </tr>
+            )}
+            {events.map((event, index) => {
+              const registered = registeredCounts[event.id] ?? 0;
+              return (
+                <tr key={event.id} className="border-b border-[#eee9fb] last:border-b-0">
+                  <td className="px-5 py-5">
+                    <div className="flex items-center gap-3">
+                      {event.image && <img src={event.image} alt="" className="h-12 w-16 rounded-xl object-cover" />}
+                      <div className="min-w-0">
+                        <p className="font-black">{event.title}</p>
+                        {index === 0 && <span className="mt-1 inline-flex rounded-full bg-green-100 px-3 py-1 text-[11px] font-black text-green-700">Live</span>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-5 py-5 font-bold">{event.date}</td>
+                  <td className="px-5 py-5 font-bold">{event.venue || "Venue TBA"}</td>
+                  <td className="px-5 py-5 font-black">{event.price > 0 ? `Rs ${event.price}` : "Free"}</td>
+                  <td className="px-5 py-5 font-black"><span className="text-[#d49b00]">★</span> {event.pointsEarnable} pts</td>
+                  <td className="px-5 py-5 font-black">{event.capacity ? `${registered}/${event.capacity}` : registered}</td>
+                  <td className="px-5 py-5">
+                    <div className="flex flex-wrap gap-2">
+                      <SmallButton label="Edit" onClick={() => onEdit(event)} />
+                      <SmallButton label="Delete" danger onClick={() => onDelete(event)} />
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Panel>
+    </section>
   );
 }
 
 function LiveEventStatus({ data, onCheckIn }: { data: AdminData; onCheckIn: (bookingId: number) => void }) {
-  const checkedIn = data.liveParticipants.filter((participant) => participant.checkIn !== "Not yet").length;
-  const paid = data.liveParticipants.filter((participant) => participant.paid).length;
+  const eventCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const participant of data.liveParticipants) counts.set(participant.eventId, (counts.get(participant.eventId) ?? 0) + 1);
+    return counts;
+  }, [data.liveParticipants]);
+  const defaultEventId = data.events.find((event) => eventCounts.has(event.id))?.id ?? data.events[0]?.id ?? 0;
+  const [selectedEventId, setSelectedEventId] = useState(0);
+  const activeEventId = selectedEventId && data.events.some((event) => event.id === selectedEventId) ? selectedEventId : defaultEventId;
+  const selectedEvent = data.events.find((event) => event.id === activeEventId) ?? null;
+  const selectedParticipants = data.liveParticipants.filter((participant) => participant.eventId === activeEventId);
+  const checkedIn = selectedParticipants.filter((participant) => participant.checkIn !== "Not yet").length;
+  const paid = selectedParticipants.filter((participant) => participant.paid).length;
+  const eventOptions = data.events.map((event) => ({
+    value: String(event.id),
+    label: `${event.title} - ${formatAdminEventDate(event.date)}`,
+  }));
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-col gap-3 rounded-[22px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb] xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0">
+          <h2 className="text-lg font-black sm:text-xl">Live Event Status</h2>
+          <p className="mt-1 text-xs font-bold text-[#8f8ba6]">
+            {selectedEvent ? `${selectedEvent.venue || "Venue TBA"} | ${formatAdminEventDate(selectedEvent.date)}` : "Select an event to view check-in status"}
+          </p>
+        </div>
+        <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center xl:w-[520px]">
+          <FilterSelect
+            ariaLabel="Select event for live status"
+            value={activeEventId ? String(activeEventId) : ""}
+            options={eventOptions.length ? eventOptions : [{ value: "", label: "No events available" }]}
+            onChange={(value) => setSelectedEventId(Number(value))}
+          />
+          <span className="inline-flex h-10 items-center justify-center gap-2 rounded-full bg-green-100 px-4 text-xs font-black text-green-700">
+            <span className="h-2.5 w-2.5 rounded-full bg-green-500" /> Live
+          </span>
+        </div>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
-        <StatCard title="Registered" value={data.stats.registered.toString()} note="Paid bookings" tone="dark" />
+        <StatCard title="Registered" value={selectedParticipants.length.toString()} note={selectedEvent?.title || "Selected event"} tone="dark" />
         <StatCard title="Checked In" value={checkedIn.toString()} note="Attendance marked" tone="purple" />
-        <StatCard title="Payment Status" value={`${paid}/${data.liveParticipants.length}`} note="Success bookings" tone="amber" />
+        <StatCard title="Payment Status" value={`${paid}/${selectedParticipants.length}`} note="Success bookings" tone="amber" />
       </div>
 
       <Panel className="overflow-x-auto p-0">
@@ -520,12 +942,12 @@ function LiveEventStatus({ data, onCheckIn }: { data: AdminData; onCheckIn: (boo
             </tr>
           </thead>
           <tbody>
-            {data.liveParticipants.length === 0 && (
+            {selectedParticipants.length === 0 && (
               <tr>
-                <td className="px-5 py-8 text-center font-black text-[#8f8ba6]" colSpan={8}>No bookings yet.</td>
+                <td className="px-5 py-8 text-center font-black text-[#8f8ba6]" colSpan={8}>No bookings for this event yet.</td>
               </tr>
             )}
-            {data.liveParticipants.map((participant, index) => {
+            {selectedParticipants.map((participant, index) => {
               const done = participant.checkIn !== "Not yet";
               return (
                 <tr key={participant.id} className="border-b border-[#eee9fb] last:border-b-0">
@@ -551,20 +973,69 @@ function LiveEventStatus({ data, onCheckIn }: { data: AdminData; onCheckIn: (boo
   );
 }
 
-function Promotions({ data, onPostUpdate, onCreateHeroSlide }: { data: AdminData; onPostUpdate: () => void; onCreateHeroSlide: (body: Record<string, unknown>) => void }) {
+function Promotions({
+  data,
+  onPostUpdate,
+  onCreateHeroSlide,
+  onUpdateHeroSlide,
+  onDeleteHeroSlide,
+}: {
+  data: AdminData;
+  onPostUpdate: () => void;
+  onCreateHeroSlide: (body: Record<string, unknown>) => void;
+  onUpdateHeroSlide: (slideId: number, body: Record<string, unknown>) => void;
+  onDeleteHeroSlide: (slideId: number) => void;
+}) {
   const [promoTab, setPromoTab] = useState(0);
+  const [editingSlide, setEditingSlide] = useState<AdminHeroSlide | null>(null);
+
+  function submitHeroSlide(body: Record<string, unknown>) {
+    if (editingSlide) {
+      onUpdateHeroSlide(editingSlide.id, body);
+      setEditingSlide(null);
+      return;
+    }
+    onCreateHeroSlide(body);
+  }
+
+  function removeHeroSlide(slide: AdminHeroSlide) {
+    if (!window.confirm(`Remove ${slide.title}? It will be removed from the user app.`)) return;
+    onDeleteHeroSlide(slide.id);
+    if (editingSlide?.id === slide.id) setEditingSlide(null);
+  }
+
+  function focusHeroSlideForm() {
+    window.setTimeout(() => document.getElementById("hero-slide-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 40);
+  }
+
+  function startNewHeroSlide() {
+    setEditingSlide(null);
+    focusHeroSlideForm();
+  }
+
+  function startEditHeroSlide(slide: AdminHeroSlide) {
+    setEditingSlide(slide);
+    focusHeroSlideForm();
+  }
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <SegmentedTabs tabs={["Hero Slides", "Updates & Push", "Reward Promos"]} activeIndex={promoTab} onSelect={setPromoTab} />
+        {promoTab === 0 && <PillButton icon={<CirclePlus size={18} />} label="Add New Slide" onClick={startNewHeroSlide} />}
         {promoTab === 1 && <PillButton icon={<CirclePlus size={18} />} label="Post Update" onClick={onPostUpdate} />}
       </div>
 
       {promoTab === 0 && (
-        <div className="grid gap-4 xl:grid-cols-[minmax(340px,420px)_minmax(0,1fr)]">
-          <HeroSlideForm onSubmit={onCreateHeroSlide} nextOrder={data.heroSlides.length + 1} />
-          <HeroSlidesList slides={data.heroSlides} />
+        <div className="space-y-5">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-lg font-black sm:text-xl">Hero Slides</h2>
+            <p className="max-w-2xl text-sm font-bold text-[#8f8ba6]">Manage the banners families see on the app home screen. Keep images bright, readable, and event-focused.</p>
+          </div>
+          <HeroSlidesList slides={data.heroSlides} onEdit={startEditHeroSlide} onRemove={removeHeroSlide} />
+          <div id="hero-slide-form">
+            <HeroSlideForm key={editingSlide?.id ?? "new"} slide={editingSlide} onSubmit={submitHeroSlide} onCancel={() => setEditingSlide(null)} nextOrder={data.heroSlides.length + 1} />
+          </div>
         </div>
       )}
       {promoTab === 1 && <UpdatesPush notifications={data.notifications} />}
@@ -573,10 +1044,23 @@ function Promotions({ data, onPostUpdate, onCreateHeroSlide }: { data: AdminData
   );
 }
 
-function HeroSlideForm({ onSubmit, nextOrder }: { onSubmit: (body: Record<string, unknown>) => void; nextOrder: number }) {
+function HeroSlideForm({
+  slide,
+  onSubmit,
+  onCancel,
+  nextOrder,
+}: {
+  slide: AdminHeroSlide | null;
+  onSubmit: (body: Record<string, unknown>) => void;
+  onCancel: () => void;
+  nextOrder: number;
+}) {
+  const editing = Boolean(slide);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
     onSubmit({
       title: form.get("title"),
       subtitle: form.get("subtitle"),
@@ -586,51 +1070,91 @@ function HeroSlideForm({ onSubmit, nextOrder }: { onSubmit: (body: Record<string
       active: form.get("active") === "on",
       image: await fileToDataUrl(form.get("image")),
     });
-    event.currentTarget.reset();
+    formElement.reset();
   }
 
   return (
-    <Panel className="min-w-0">
-      <h2 className="text-lg font-black">Add Hero Slide</h2>
-      <p className="mt-1 text-xs font-bold text-[#8f8ba6]">Upload image yahan se app home banner me reflect hogi.</p>
-      <form onSubmit={submit} className="mt-4 grid gap-4">
-        <Field name="title" label="Slide Title *" required placeholder="Summer Creative Camp" />
-        <Field name="subtitle" label="Subtitle" placeholder="Book activities and earn Konnect Points" />
-        <FileField name="image" label="Hero Image *" required />
-        <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(112px,150px)]">
-          <Field name="ctaLabel" label="Button Text" placeholder="Explore" />
-          <Field name="sortOrder" label="Order" type="number" min="0" defaultValue={String(nextOrder)} />
+    <Panel className="min-w-0 p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-[0.18em] text-[#8f8ba6]">{editing ? "Editing selected slide" : "Create new banner"}</p>
+          <h2 className="mt-1 text-lg font-black">{editing ? "Edit Hero Slide" : "Add Hero Slide"}</h2>
+          <p className="mt-1 text-sm font-bold text-[#8f8ba6]">Form is placed below the slide list so the current banners stay easy to scan.</p>
         </div>
-        <SelectField label="Click Action" name="target" options={["activities", "rewards", "refer", "install", "none"]} />
-        <label className="flex items-center justify-between gap-4 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3">
-          <span className="text-xs font-black">Active</span>
-          <input name="active" type="checkbox" defaultChecked className="h-5 w-5 accent-[#604bd1]" />
-        </label>
-        <PillButton label="Save Slide" submit />
+        {editing && <SmallButton label="Cancel" onClick={onCancel} />}
+      </div>
+      <form onSubmit={submit} className="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(280px,0.8fr)]">
+        <div className="grid min-w-0 gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <Field name="title" label="Slide Title *" required placeholder="Summer Creative Camp" defaultValue={slide?.title ?? ""} />
+            <Field name="subtitle" label="Subtitle" placeholder="Book activities and earn Konnect Points" defaultValue={slide?.subtitle ?? ""} />
+          </div>
+          <FileField name="image" label={editing ? "Replace Hero Image" : "Hero Image *"} required={!editing} />
+          <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(112px,150px)]">
+            <Field name="ctaLabel" label="Button Text" placeholder="Explore" defaultValue={slide?.ctaLabel ?? ""} />
+            <Field name="sortOrder" label="Order" type="number" min="0" defaultValue={String(slide?.sortOrder ?? nextOrder)} />
+          </div>
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_160px]">
+            <SelectField label="Click Action" name="target" options={["activities", "rewards", "refer", "install", "none"]} defaultValue={slide?.target ?? "activities"} />
+            <label className="flex items-center justify-between gap-4 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3">
+              <span className="text-xs font-black">Active</span>
+              <input name="active" type="checkbox" defaultChecked={slide?.active ?? true} className="h-5 w-5 accent-[#604bd1]" />
+            </label>
+          </div>
+          <PillButton label={editing ? "Save Changes" : "Save Slide"} submit />
+        </div>
+        <div className="min-w-0">
+          {editing && slide?.image ? (
+            <div className="grid gap-2">
+              <span className="text-xs font-black">Current Hero Image</span>
+              <div className="overflow-hidden rounded-[18px] border border-[#ddd6fb] bg-[#f8f7ff]">
+                <img src={slide.image} alt={`${slide.title} hero`} className="h-44 w-full object-cover" />
+              </div>
+              <p className="text-xs font-bold text-[#8f8ba6]">Leave image blank to keep the current banner.</p>
+            </div>
+          ) : (
+            <div className="grid min-h-[190px] place-items-center rounded-[18px] border-2 border-dashed border-[#ddd6fb] bg-[#f8f7ff] px-5 text-center">
+              <div>
+                <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-[#604bd1] text-white"><Grid2X2 size={21} /></div>
+                <p className="mt-3 text-sm font-black text-[#5b45d1]">Banner preview appears here while editing</p>
+                <p className="mt-1 text-xs font-bold text-[#8f8ba6]">Use a wide event or reward image for best results.</p>
+              </div>
+            </div>
+          )}
+        </div>
       </form>
     </Panel>
   );
 }
 
-function HeroSlidesList({ slides }: { slides: AdminHeroSlide[] }) {
+function HeroSlidesList({ slides, onEdit, onRemove }: { slides: AdminHeroSlide[]; onEdit: (slide: AdminHeroSlide) => void; onRemove: (slide: AdminHeroSlide) => void }) {
   return (
-    <div className="grid min-w-0 gap-4">
+    <div className="grid min-w-0 gap-4 lg:grid-cols-2 2xl:grid-cols-3">
       {slides.length === 0 && <EmptyState text="No hero slides added yet." />}
       {slides.map((slide, index) => (
         <Panel key={slide.id} className="overflow-hidden p-0">
-          <div className="grid gap-0 md:grid-cols-[220px_1fr]">
-            <div className="h-40 bg-[#6754d6] md:h-full">
-              <img src={slide.image} alt={slide.title} className="h-full w-full object-cover" />
+          <div className="relative h-48 bg-[#6754d6]">
+            <img src={slide.image} alt={slide.title} className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[#1c173d]/78 via-[#1c173d]/16 to-transparent" />
+            <div className="absolute left-4 top-4 flex flex-wrap gap-2">
+              <Badge tone={slide.active ? "green" : "gold"}>{slide.active ? "Visible" : "Hidden"}</Badge>
+              <Badge tone="soft">Slide {index + 1}</Badge>
             </div>
-            <div className="p-5">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="purple">Slide {index + 1}</Badge>
-                <Badge tone={slide.active ? "green" : "gold"}>{slide.active ? "Active" : "Inactive"}</Badge>
-                <Badge tone="soft">{slide.target}</Badge>
-              </div>
-              <h3 className="mt-4 text-lg font-black">{slide.title}</h3>
-              <p className="mt-2 text-sm font-semibold text-[#8f8ba6]">{slide.subtitle || "No subtitle"}</p>
-              <p className="mt-4 text-xs font-black text-[#5b45d1]">{slide.ctaLabel} | Order {slide.sortOrder}</p>
+            <div className="absolute bottom-4 left-4 right-4 text-white">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/75">Home banner</p>
+              <h3 className="mt-1 line-clamp-2 text-xl font-black">{slide.title}</h3>
+            </div>
+          </div>
+          <div className="p-5">
+            <p className="line-clamp-2 min-h-10 text-sm font-semibold leading-5 text-[#8f8ba6]">{slide.subtitle || "No subtitle added"}</p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Badge tone="purple">{slide.target}</Badge>
+              <Badge tone="soft">{slide.ctaLabel || "Explore"}</Badge>
+              <Badge tone="soft">Order {slide.sortOrder}</Badge>
+            </div>
+            <div className="mt-5 flex flex-wrap gap-3">
+              <SmallButton label="Edit" onClick={() => onEdit(slide)} />
+              <SmallButton label="Remove" danger onClick={() => onRemove(slide)} />
             </div>
           </div>
         </Panel>
@@ -685,11 +1209,15 @@ function Business({
   data,
   onAddBrand,
   onBrandStatus,
+  onEditBrand,
+  onRemoveBrand,
   onRedemptionStatus,
 }: {
   data: AdminData;
   onAddBrand: () => void;
   onBrandStatus: (brandId: number, active: boolean) => void;
+  onEditBrand: (brand: AdminBrand) => void;
+  onRemoveBrand: (brand: AdminBrand) => void;
   onRedemptionStatus: (redemptionId: number, status: "issued" | "redeemed" | "cancelled") => void;
 }) {
   const [businessTab, setBusinessTab] = useState(0);
@@ -703,7 +1231,7 @@ function Business({
       {businessTab === 0 ? (
         <div className="grid gap-4 xl:grid-cols-2">
           {data.brands.length === 0 && <EmptyState text="No reward brands yet." />}
-          {data.brands.map((brand) => <BrandCard key={brand.id} brand={brand} onStatusChange={onBrandStatus} />)}
+          {data.brands.map((brand) => <BrandCard key={brand.id} brand={brand} onStatusChange={onBrandStatus} onEdit={() => onEditBrand(brand)} onRemove={() => onRemoveBrand(brand)} />)}
         </div>
       ) : (
         <RedemptionsTable redemptions={data.redemptions} onRedemptionStatus={onRedemptionStatus} />
@@ -838,7 +1366,7 @@ function NotificationModal({ onClose, onSubmit }: { onClose: () => void; onSubmi
   );
 }
 
-function BrandModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (body: Record<string, unknown>) => void }) {
+function BrandModal({ brand, onClose, onSubmit }: { brand?: AdminBrand; onClose: () => void; onSubmit: (body: Record<string, unknown>) => void }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -853,28 +1381,35 @@ function BrandModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (bod
     });
   }
 
+  const editing = Boolean(brand);
+
   return (
-    <AdminFormModal title="Add Reward Brand" icon={<Gift />} onClose={onClose}>
+    <AdminFormModal title={editing ? "Edit Reward Brand" : "Add Reward Brand"} icon={<Gift />} onClose={onClose}>
       <form onSubmit={submit} className="grid gap-4">
-        <Field name="name" label="Brand Name *" required placeholder="Domino's Pizza" />
-        <Field name="pointsCost" label="Points Required" type="number" min="0" defaultValue="250" />
-        <Field name="note" label="Reward Note" placeholder="Flat 20% off on selected items" />
+        <Field name="name" label="Brand Name *" required placeholder="Domino's Pizza" defaultValue={brand?.name ?? ""} />
+        <Field name="pointsCost" label="Points Required" type="number" min="0" defaultValue={brand?.pointsCost ?? 250} />
+        <Field name="note" label="Reward Note" placeholder="Flat 20% off on selected items" defaultValue={brand?.note ?? ""} />
         <div className="grid gap-4 sm:grid-cols-2">
           <FileField name="logo" label="Brand Logo" />
           <FileField name="image" label="Reward Photo / Banner" />
         </div>
+        {editing && (
+          <div className="rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-xs font-bold leading-5 text-[#8f8ba6]">
+            Leave logo/photo blank to keep the current images.
+          </div>
+        )}
         <label className="flex items-center justify-between gap-4 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3">
           <span>
             <span className="block text-xs font-black">Brand Active</span>
-            <span className="text-xs font-bold text-[#8f8ba6]">Off karne par user app me reward hide ho jayega.</span>
+            <span className="text-xs font-bold text-[#8f8ba6]">Turning this off hides the reward in the user app.</span>
           </span>
-          <input name="active" type="checkbox" defaultChecked className="h-5 w-5 accent-[#604bd1]" />
+          <input name="active" type="checkbox" defaultChecked={brand?.active ?? true} className="h-5 w-5 accent-[#604bd1]" />
         </label>
         <label className="grid gap-2">
           <span className="text-xs font-black">Description</span>
-          <textarea name="description" className="min-h-24 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
+          <textarea name="description" defaultValue={brand?.description ?? ""} className="min-h-24 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
         </label>
-        <FormActions onClose={onClose} primaryLabel="Add Brand" />
+        <FormActions onClose={onClose} primaryLabel={editing ? "Save Changes" : "Add Brand"} />
       </form>
     </AdminFormModal>
   );
@@ -893,15 +1428,15 @@ function ReferralSettingsModal({ onClose }: { onClose: () => void }) {
 
 function AdminFormModal({ title, icon, children, onClose }: { title: string; icon: ReactNode; children: ReactNode; onClose: () => void }) {
   return (
-    <div className="fixed inset-0 z-[300] grid place-items-center bg-[#161332]/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-      <div className="w-full max-w-3xl overflow-hidden rounded-[28px] bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-[#e7e1fb] px-6 py-5">
+    <div className="fixed inset-0 z-[300] grid place-items-center overflow-y-auto bg-[#161332]/55 p-3 backdrop-blur-sm sm:p-4" role="dialog" aria-modal="true">
+      <div className="flex max-h-[calc(100dvh-1.5rem)] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)]">
+        <div className="shrink-0 flex items-center justify-between border-b border-[#e7e1fb] px-5 py-4 sm:px-6 sm:py-5">
           <h2 className="flex items-center gap-3 text-xl font-black"><span className="text-[#604bd1]">{icon}</span>{title}</h2>
           <button onClick={onClose} className="grid h-11 w-11 place-items-center rounded-full bg-[#f6f3ff] text-[#8f8ba6] transition hover:bg-[#e7ddff] hover:text-[#5b45d1]" type="button" aria-label="Close popup">
             <X size={22} />
           </button>
         </div>
-        <div className="grid gap-4 px-6 py-6">{children}</div>
+        <div className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">{children}</div>
       </div>
     </div>
   );
@@ -909,7 +1444,7 @@ function AdminFormModal({ title, icon, children, onClose }: { title: string; ico
 
 function FormActions({ onClose, primaryLabel }: { onClose: () => void; primaryLabel: string }) {
   return (
-    <div className="flex justify-end gap-3 border-t border-[#e7e1fb] pt-5">
+    <div className="sticky bottom-0 -mx-5 mt-1 flex justify-end gap-3 border-t border-[#e7e1fb] bg-white/95 px-5 pt-5 backdrop-blur sm:-mx-6 sm:px-6">
       <button onClick={onClose} className="rounded-full border-2 border-[#e7e1fb] px-6 py-3 text-sm font-black text-[#5b45d1]" type="button">
         Cancel
       </button>
@@ -977,11 +1512,75 @@ function MemberCard({ member }: { member: AdminMember }) {
         <ParentMini role="Primary Parent" name={member.father} phone={member.fatherPhone} initials={member.initials} />
         <ParentMini role="Alternate Parent" name={member.mother} phone={member.motherPhone} initials={member.mother.slice(0, 1) || "P"} pink />
       </div>
+      <div className="border-t border-[#e7e1fb] bg-white p-4 sm:p-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h4 className="text-[11px] font-black uppercase tracking-[0.18em] text-[#8f8ba6]">Kids Profiles ({member.kids.length})</h4>
+          {member.kids.length > 0 && <Badge tone="soft">{member.kids.filter((kid) => kid.status === "approved").length} approved</Badge>}
+        </div>
+        {member.kids.length === 0 ? (
+          <div className="rounded-2xl border-2 border-dashed border-[#ddd6fb] bg-[#f8f7ff] px-4 py-4 text-xs font-black text-[#8f8ba6]">
+            No child profiles added for this parent yet.
+          </div>
+        ) : (
+          <div className="grid gap-3">
+            {member.kids.map((kid) => (
+              <MemberKidRow key={kid.id} kid={kid} />
+            ))}
+          </div>
+        )}
+      </div>
     </Panel>
   );
 }
 
-function BrandCard({ brand, onStatusChange }: { brand: AdminBrand; onStatusChange: (brandId: number, active: boolean) => void }) {
+function MemberKidRow({ kid }: { kid: AdminKid }) {
+  return (
+    <div className="flex items-center gap-3 rounded-[18px] border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3">
+      <KidPhoto kid={kid} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h5 className="text-sm font-black text-[#161332]">{kid.name}</h5>
+          <Badge tone="gold">Age {kid.age.replace(" years", "")}</Badge>
+          <Badge tone="purple">{kid.points} pts</Badge>
+        </div>
+        <p className="mt-1 text-xs font-bold text-[#8f8ba6]">
+          {kid.grade} - {kid.school || "School not added"} - {kid.dob}
+        </p>
+      </div>
+      <KidStatusPill status={kid.status} />
+    </div>
+  );
+}
+
+function KidPhoto({ kid }: { kid: AdminKid }) {
+  return (
+    <div className="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-full bg-[#ffe0ef] text-sm font-black text-[#161332]">
+      {kid.photo ? <img src={kid.photo} alt="" className="h-full w-full object-cover" /> : kid.initials}
+    </div>
+  );
+}
+
+function KidStatusPill({ status }: { status: AdminKid["status"] }) {
+  const styles = {
+    approved: "bg-green-100 text-green-700",
+    pending: "bg-[#fff2c7] text-[#c99000]",
+    rejected: "bg-red-100 text-red-700",
+  };
+
+  return <span className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-black capitalize ${styles[status]}`}>{status}</span>;
+}
+
+function BrandCard({
+  brand,
+  onStatusChange,
+  onEdit,
+  onRemove,
+}: {
+  brand: AdminBrand;
+  onStatusChange: (brandId: number, active: boolean) => void;
+  onEdit: () => void;
+  onRemove: () => void;
+}) {
   return (
     <Panel className="overflow-hidden p-0">
       <div className={`relative h-32 overflow-hidden ${brand.color || "bg-[#6754d6]"}`}>
@@ -1002,6 +1601,10 @@ function BrandCard({ brand, onStatusChange }: { brand: AdminBrand; onStatusChang
           <Badge tone="soft">{brand.code}</Badge>
           <Badge tone="gold">{brand.pointsCost} pts</Badge>
           <Badge tone={brand.active ? "green" : "gold"}>{brand.active ? "Active" : "Inactive"}</Badge>
+        </div>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <SmallButton label="Edit" onClick={onEdit} />
+          <SmallButton label="Remove" danger onClick={onRemove} />
         </div>
       </div>
     </Panel>
@@ -1075,7 +1678,7 @@ function MetricCard({ title, value, note, icon, green, amber }: { title: string;
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-[11px] font-black uppercase tracking-[0.14em] text-[#8f8ba6]">{title}</p>
-          <p className={`mt-2 truncate text-2xl font-black ${green ? "text-green-600" : amber ? "text-[#c99000]" : "text-[#1c173d]"}`}>{value}</p>
+          <p className={`mt-2 truncate text-md font-black ${green ? "text-green-600" : amber ? "text-[#c99000]" : "text-[#1c173d]"}`}>{value}</p>
           <p className="mt-1 text-xs font-bold text-green-600">{note}</p>
         </div>
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#f0ebff] text-[#8f6d19]">{icon}</div>
@@ -1084,11 +1687,11 @@ function MetricCard({ title, value, note, icon, green, amber }: { title: string;
   );
 }
 
-function SearchBox({ placeholder }: { placeholder: string }) {
+function SearchBox({ placeholder, value, onChange }: { placeholder: string; value?: string; onChange?: (value: string) => void }) {
   return (
-    <label className="flex h-11 min-w-0 items-center gap-3 rounded-2xl border border-[#e7e1fb] bg-white px-4 text-xs font-semibold text-[#8f8ba6] shadow-sm">
+    <label className="flex h-12 min-w-0 items-center gap-3 rounded-2xl border border-[#e7e1fb] bg-white px-4 text-xs font-semibold text-[#8f8ba6] shadow-sm">
       <Search size={19} className="text-[#5b45d1]" />
-      <input className="min-w-0 flex-1 bg-transparent outline-none" placeholder={placeholder} />
+      <input className="min-w-0 flex-1 bg-transparent outline-none" placeholder={placeholder} value={value} onChange={(event) => onChange?.(event.target.value)} />
     </label>
   );
 }
@@ -1200,11 +1803,18 @@ function EmptyState({ text }: { text: string }) {
   return <div className="rounded-[18px] bg-white p-5 text-center text-sm font-black text-[#8f8ba6] shadow-sm ring-1 ring-[#e8e0ff]">{text}</div>;
 }
 
+function formatAdminEventDate(value: string) {
+  if (!value) return "Date TBA";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short" }).format(date);
+}
+
 async function postJson(url: string, body: unknown) {
   return requestJson(url, { method: "POST", body });
 }
 
-async function requestJson(url: string, options: { method: "POST" | "PATCH"; body: unknown }) {
+async function requestJson(url: string, options: { method: "POST" | "PATCH" | "DELETE"; body: unknown }) {
   const response = await fetch(url, { method: options.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(options.body) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.message || "Request failed.");
@@ -1213,8 +1823,8 @@ async function requestJson(url: string, options: { method: "POST" | "PATCH"; bod
 
 async function fileToDataUrl(value: FormDataEntryValue | null) {
   if (!(value instanceof File) || value.size === 0) return "";
-  if (!value.type.startsWith("image/")) throw new Error("Please upload only image files for brand logo/photo.");
-  if (value.size > 1_500_000) throw new Error("Brand images must be smaller than 1.5 MB.");
+  if (!value.type.startsWith("image/")) throw new Error("Please upload only image files.");
+  if (value.size > 1_500_000) throw new Error("Images must be smaller than 1.5 MB.");
 
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();

@@ -4,6 +4,7 @@ import { randomBytes } from "crypto";
 import { cookies } from "next/headers";
 import { queryOne, queryRows, executeQuery, type DbRow } from "@/lib/db";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
+import { notifyUser, notifyUsersByRole } from "@/lib/push-notifications";
 
 export type AdminData = {
   stats: {
@@ -41,10 +42,12 @@ export type AdminMember = {
   plan: string;
   code: string;
   active: boolean;
+  kids: AdminKid[];
 };
 
 export type AdminKid = {
   id: number;
+  parentId: number;
   initials: string;
   name: string;
   age: string;
@@ -58,6 +61,7 @@ export type AdminKid = {
   phone: string;
   locality: string;
   requested: string;
+  points: number;
   status: "pending" | "approved" | "rejected";
 };
 
@@ -68,6 +72,7 @@ export type AdminEvent = {
   date: string;
   dateValue: string;
   timeValue: string;
+  image: string;
   category: string;
   price: number;
   capacity: number;
@@ -81,6 +86,10 @@ export type AdminEvent = {
 
 export type AdminParticipant = {
   id: number;
+  eventId: number;
+  eventTitle: string;
+  eventDate: string;
+  eventLocation: string;
   participant: string;
   parent: string;
   phone: string;
@@ -113,6 +122,8 @@ export type AdminBrand = {
   name: string;
   email: string;
   code: string;
+  description: string;
+  note: string;
   color: string;
   icon: string;
   logo: string;
@@ -148,6 +159,8 @@ export type AdminReferral = {
 
 type AnyRow = DbRow & Record<string, unknown>;
 
+let adminProductSchemaReady: Promise<void> | null = null;
+
 export async function requireAdmin() {
   const cookieStore = await cookies();
   const session = verifySessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
@@ -157,9 +170,9 @@ export async function requireAdmin() {
 
 export async function getAdminData(): Promise<AdminData> {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
 
-  const [statsRows, users, pendingKids, events, participants, notifications, heroSlides, brands, redemptions, topReferrers, recentReferrals] =
+  const [statsRows, users, memberKids, pendingKids, events, participants, notifications, heroSlides, brands, redemptions, topReferrers, recentReferrals] =
     await Promise.all([
       queryRows<AnyRow>(`
         SELECT
@@ -175,21 +188,39 @@ export async function getAdminData(): Promise<AdminData> {
       `),
       queryRows<AnyRow>("SELECT * FROM users ORDER BY created_at DESC LIMIT 80"),
       queryRows<AnyRow>(`
-        SELECT k.*, u.parent_name, u.father_name, u.mother_name, u.mobile, u.alternate_mobile, u.locality, u.city, u.address
+        SELECT
+          k.id, k.parent_id, k.child_name, k.age, k.block_rank, k.dob, k.school, k.school_id_card,
+          k.photo, k.status, k.konnekt_points, k.created_at,
+          (NULLIF(k.photo_data, '') IS NOT NULL) AS has_photo_data,
+          (NULLIF(k.school_id_card_data, '') IS NOT NULL) AS has_school_id_card_data,
+          u.parent_name, u.father_name, u.mother_name, u.mobile, u.alternate_mobile, u.locality, u.city, u.address, u.pincode
+        FROM kids k
+        JOIN users u ON u.id = k.parent_id
+        ORDER BY k.created_at DESC
+        LIMIT 240
+      `),
+      queryRows<AnyRow>(`
+        SELECT
+          k.id, k.parent_id, k.child_name, k.age, k.block_rank, k.dob, k.school, k.school_id_card,
+          k.photo, k.status, k.konnekt_points, k.created_at,
+          (NULLIF(k.photo_data, '') IS NOT NULL) AS has_photo_data,
+          (NULLIF(k.school_id_card_data, '') IS NOT NULL) AS has_school_id_card_data,
+          u.parent_name, u.father_name, u.mother_name, u.mobile, u.alternate_mobile, u.locality, u.city, u.address, u.pincode
         FROM kids k
         JOIN users u ON u.id = k.parent_id
         WHERE k.status = 'pending'
         ORDER BY k.created_at DESC
         LIMIT 50
       `),
-      queryRows<AnyRow>("SELECT * FROM events ORDER BY event_date DESC NULLS LAST, created_at DESC LIMIT 80"),
+      queryRows<AnyRow>("SELECT * FROM events WHERE COALESCE(is_active, true) = true ORDER BY event_date DESC NULLS LAST, created_at DESC LIMIT 80"),
       queryRows<AnyRow>(`
-        SELECT b.*, k.child_name, u.parent_name, u.mobile
+        SELECT b.*, k.child_name, u.parent_name, u.mobile, e.title AS event_title, e.event_date, e.location AS event_location
         FROM bookings b
         JOIN kids k ON k.id = b.kid_id
         JOIN users u ON u.id = b.user_id
+        LEFT JOIN events e ON e.id = b.event_id
         ORDER BY b.created_at DESC
-        LIMIT 80
+        LIMIT 500
       `),
       queryRows<AnyRow>("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 30"),
       queryRows<AnyRow>("SELECT * FROM hero_slides ORDER BY sort_order ASC, created_at DESC LIMIT 20"),
@@ -225,6 +256,7 @@ export async function getAdminData(): Promise<AdminData> {
     ]);
 
   const statsRow = statsRows[0] ?? {};
+  const kidsByParent = groupKidsByParent(memberKids.map(mapAdminKid));
 
   return {
     stats: {
@@ -238,8 +270,8 @@ export async function getAdminData(): Promise<AdminData> {
       totalReferrals: num(statsRow.total_referrals),
       referralPoints: num(statsRow.referral_points),
     },
-    members: users.map(mapMember),
-    pendingKids: pendingKids.map(mapPendingKid),
+    members: users.map((row) => mapMember(row, kidsByParent.get(num(row.id)) ?? [])),
+    pendingKids: pendingKids.map(mapAdminKid),
     events: events.map(mapEvent),
     liveParticipants: participants.map(mapParticipant),
     notifications: notifications.map(mapNotification),
@@ -265,11 +297,11 @@ export async function getAdminData(): Promise<AdminData> {
 
 export async function createAdminEvent(input: Record<string, unknown>) {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
   const event = normalizeEventInput(input);
 
   await executeQuery(
-    "INSERT INTO events (title, location, event_date, price, capacity, category, description, min_age, max_age, gender, restricted_area, points_earnable, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)",
+    "INSERT INTO events (title, location, event_date, price, capacity, category, description, image, min_age, max_age, gender, restricted_area, points_earnable, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, true)",
     [
       event.title,
       event.venue,
@@ -278,6 +310,7 @@ export async function createAdminEvent(input: Record<string, unknown>) {
       event.capacity,
       event.category,
       event.description,
+      event.image || null,
       event.minAge,
       event.maxAge,
       event.gender,
@@ -285,17 +318,24 @@ export async function createAdminEvent(input: Record<string, unknown>) {
       event.pointsEarnable,
     ],
   );
+
+  await notifyUsersByRole("user", {
+    title: "New activity added",
+    body: `${event.title} is now live in Konnectly.`,
+    url: "/app?tab=Activities",
+    tag: `event-created-${Date.now()}`,
+  });
 }
 
 export async function updateAdminEvent(eventId: number, input: Record<string, unknown>) {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
   if (!eventId) throw new Error("Activity not found.");
   const event = normalizeEventInput(input);
 
   await executeQuery(
     `UPDATE events
-     SET title = ?, location = ?, event_date = ?, price = ?, capacity = ?, category = ?, description = ?, min_age = ?, max_age = ?, gender = ?, restricted_area = ?, points_earnable = ?
+     SET title = ?, location = ?, event_date = ?, price = ?, capacity = ?, category = ?, description = ?, image = COALESCE(NULLIF(?, ''), image), min_age = ?, max_age = ?, gender = ?, restricted_area = ?, points_earnable = ?
      WHERE id = ?`,
     [
       event.title,
@@ -305,6 +345,7 @@ export async function updateAdminEvent(eventId: number, input: Record<string, un
       event.capacity,
       event.category,
       event.description,
+      event.image,
       event.minAge,
       event.maxAge,
       event.gender,
@@ -313,6 +354,27 @@ export async function updateAdminEvent(eventId: number, input: Record<string, un
       eventId,
     ],
   );
+
+  await notifyUsersByRole("user", {
+    title: "Activity updated",
+    body: `${event.title} details were updated.`,
+    url: "/app?tab=Activities",
+    tag: `event-updated-${eventId}`,
+  });
+}
+
+export async function deleteAdminEvent(eventId: number) {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  if (!eventId) throw new Error("Activity not found.");
+  const event = await queryOne<AnyRow>("SELECT title FROM events WHERE id = ? LIMIT 1", [eventId]);
+  await executeQuery("UPDATE events SET is_active = false WHERE id = ?", [eventId]);
+  await notifyUsersByRole("user", {
+    title: "Activity update",
+    body: `${str(event?.title) || "An activity"} was removed from the app.`,
+    url: "/app?tab=Activities",
+    tag: `event-deleted-${eventId}`,
+  });
 }
 
 export async function createAdminNotification(input: Record<string, unknown>) {
@@ -320,13 +382,20 @@ export async function createAdminNotification(input: Record<string, unknown>) {
   const message = clean(input.message);
   if (!message) throw new Error("Message is required.");
   await executeQuery("INSERT INTO notifications (message, type) VALUES (?, ?)", [message, clean(input.type) === "alert" ? "alert" : "announcement"]);
+  await notifyUsersByRole("user", {
+    title: clean(input.type) === "alert" ? "Konnectly Alert" : "Konnectly Update",
+    body: message,
+    url: "/app?tab=Updates",
+    tag: `admin-update-${Date.now()}`,
+  });
 }
 
 export async function createHeroSlide(input: Record<string, unknown>) {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
   const title = clean(input.title);
   const image = cleanImageData(input.image);
+  const active = isTruthy(input.active);
   if (!title) throw new Error("Slide title is required.");
   if (!image) throw new Error("Hero slide image is required.");
 
@@ -339,15 +408,80 @@ export async function createHeroSlide(input: Record<string, unknown>) {
       clean(input.ctaLabel) || "Explore",
       clean(input.target) || "activities",
       Number(input.sortOrder || 0),
-      isTruthy(input.active),
+      active,
     ],
   );
+
+  if (active) {
+    await notifyUsersByRole("user", {
+      title: "Home updated",
+      body: `${title} is now live on Konnectly.`,
+      url: "/app",
+      tag: `hero-created-${Date.now()}`,
+    });
+  }
+}
+
+export async function updateHeroSlide(slideId: number, input: Record<string, unknown>) {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  const title = clean(input.title);
+  const active = isTruthy(input.active);
+  if (!slideId) throw new Error("Hero slide not found.");
+  if (!title) throw new Error("Slide title is required.");
+
+  await executeQuery(
+    `
+      UPDATE hero_slides
+      SET title = ?,
+          subtitle = ?,
+          image = COALESCE(?, image),
+          cta_label = ?,
+          target = ?,
+          sort_order = ?,
+          is_active = ?,
+          updated_at = NOW()
+      WHERE id = ?
+    `,
+    [
+      title,
+      clean(input.subtitle),
+      cleanImageData(input.image),
+      clean(input.ctaLabel) || "Explore",
+      clean(input.target) || "activities",
+      Number(input.sortOrder || 0),
+      active,
+      slideId,
+    ],
+  );
+
+  await notifyUsersByRole("user", {
+    title: "Home banner updated",
+    body: active ? `${title} was updated on Konnectly.` : `${title} was paused on Konnectly.`,
+    url: "/app",
+    tag: `hero-updated-${slideId}`,
+  });
+}
+
+export async function deleteHeroSlide(slideId: number) {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  if (!slideId) throw new Error("Hero slide not found.");
+  const slide = await queryOne<AnyRow>("SELECT title FROM hero_slides WHERE id = ? LIMIT 1", [slideId]);
+  await executeQuery("DELETE FROM hero_slides WHERE id = ?", [slideId]);
+  await notifyUsersByRole("user", {
+    title: "Home banner removed",
+    body: `${str(slide?.title) || "A Konnectly banner"} was removed from the app.`,
+    url: "/app",
+    tag: `hero-deleted-${slideId}`,
+  });
 }
 
 export async function createAdminBrand(input: Record<string, unknown>) {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
   const name = clean(input.name);
+  const active = isTruthy(input.active);
   if (!name) throw new Error("Brand name is required.");
   await executeQuery("INSERT INTO brands (name, description, note, points_cost, logo, image, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)", [
     name,
@@ -356,32 +490,107 @@ export async function createAdminBrand(input: Record<string, unknown>) {
     Number(input.pointsCost || 250),
     cleanImageData(input.logo),
     cleanImageData(input.image),
-    isTruthy(input.active),
+    active,
   ]);
+
+  if (active) {
+    await notifyUsersByRole("user", {
+      title: "New reward partner",
+      body: `${name} rewards are now available.`,
+      url: "/app?tab=Account",
+      tag: `brand-created-${Date.now()}`,
+    });
+  }
+}
+
+export async function updateAdminBrand(input: Record<string, unknown>) {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  const brandId = Number(input.brandId);
+  const name = clean(input.name);
+  const active = isTruthy(input.active);
+  if (!brandId) throw new Error("Brand not found.");
+  if (!name) throw new Error("Brand name is required.");
+  await executeQuery(
+    `UPDATE brands
+     SET name = ?,
+         description = ?,
+         note = ?,
+         points_cost = ?,
+         logo = COALESCE(NULLIF(?, ''), logo),
+         image = COALESCE(NULLIF(?, ''), image),
+         is_active = ?
+     WHERE id = ?`,
+    [
+      name,
+      clean(input.description),
+      clean(input.note),
+      Number(input.pointsCost || 0),
+      cleanImageData(input.logo) || "",
+      cleanImageData(input.image) || "",
+      active,
+      brandId,
+    ],
+  );
+
+  await notifyUsersByRole("user", {
+    title: "Reward partner updated",
+    body: active ? `${name} reward details were updated.` : `${name} rewards are currently paused.`,
+    url: "/app?tab=Account",
+    tag: `brand-updated-${brandId}`,
+  });
 }
 
 export async function updateBrandStatus(brandId: number, active: boolean) {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
   if (!brandId) throw new Error("Brand not found.");
+  const brand = await queryOne<AnyRow>("SELECT name FROM brands WHERE id = ? LIMIT 1", [brandId]);
   await executeQuery("UPDATE brands SET is_active = ? WHERE id = ?", [active, brandId]);
+  await notifyUsersByRole("user", {
+    title: active ? "Reward partner available" : "Reward partner paused",
+    body: active ? `${str(brand?.name) || "A reward partner"} is available again.` : `${str(brand?.name) || "A reward partner"} is not available right now.`,
+    url: "/app?tab=Account",
+    tag: `brand-status-${brandId}`,
+  });
+}
+
+export async function deleteAdminBrand(brandId: number) {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  if (!brandId) throw new Error("Brand not found.");
+  const brand = await queryOne<AnyRow>("SELECT name FROM brands WHERE id = ? LIMIT 1", [brandId]);
+  try {
+    await executeQuery("UPDATE redemptions SET brand_id = NULL WHERE brand_id = ?", [brandId]);
+  } catch {
+    // Older installations stored only brand_name on redemptions.
+  }
+  await executeQuery("DELETE FROM brand_users WHERE brand_id = ?", [brandId]);
+  await executeQuery("DELETE FROM brands WHERE id = ?", [brandId]);
+  await notifyUsersByRole("user", {
+    title: "Reward partner removed",
+    body: `${str(brand?.name) || "A reward partner"} was removed from Konnectly rewards.`,
+    url: "/app?tab=Account",
+    tag: `brand-deleted-${brandId}`,
+  });
 }
 
 export async function updateKidStatus(kidId: number, status: "approved" | "rejected") {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
+  const kid = await queryOne<AnyRow>(
+    `SELECT k.child_name, u.id AS parent_id, u.mobile
+     FROM kids k
+     JOIN users u ON u.id = k.parent_id
+     WHERE k.id = ?
+     LIMIT 1`,
+    [kidId],
+  );
+  if (!kid) throw new Error("Child profile not found.");
   const kode = status === "approved" ? await generateKidCode(kidId) : null;
   if (status === "approved") {
     await executeQuery("UPDATE kids SET status = 'approved', konnekt_kode = COALESCE(konnekt_kode, ?) WHERE id = ?", [kode, kidId]);
     await awardReferralOnApproval(kidId);
-    const kid = await queryOne<AnyRow>(
-      `SELECT k.child_name, u.mobile
-       FROM kids k
-       JOIN users u ON u.id = k.parent_id
-       WHERE k.id = ?
-       LIMIT 1`,
-      [kidId],
-    );
     if (kid?.mobile) {
       const { sendWhatsAppText } = await import("@/lib/auth/otp");
       await sendWhatsAppText(
@@ -392,11 +601,21 @@ export async function updateKidStatus(kidId: number, status: "approved" | "rejec
   } else {
     await executeQuery("UPDATE kids SET status = 'rejected' WHERE id = ?", [kidId]);
   }
+
+  await notifyUser(num(kid.parent_id), {
+    title: status === "approved" ? "Child profile approved" : "Child profile needs review",
+    body:
+      status === "approved"
+        ? `${str(kid.child_name) || "Your child"} is verified. You can book activities now.`
+        : `${str(kid.child_name) || "Your child"} profile was not approved. Please update the details.`,
+    url: "/app?tab=Account",
+    tag: `kid-status-${kidId}`,
+  });
 }
 
 export async function getAdminKidFile(kidId: number, type: "photo" | "schoolId") {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
   if (!kidId) throw new Error("File not found.");
 
   const row = await queryOne<AnyRow>(
@@ -476,6 +695,11 @@ async function ensureAdminProductSchema() {
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS restricted_area VARCHAR(190)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS points_earnable INTEGER NOT NULL DEFAULT 100");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS image TEXT");
+  await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true");
+  await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS qr_code VARCHAR(255)");
+  await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
+  await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS redeemed_at TIMESTAMPTZ");
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS hero_slides (
       id SERIAL PRIMARY KEY,
@@ -506,6 +730,14 @@ async function ensureAdminProductSchema() {
   `);
 }
 
+async function ensureAdminProductSchemaOnce() {
+  adminProductSchemaReady ??= ensureAdminProductSchema().catch((error) => {
+    adminProductSchemaReady = null;
+    throw error;
+  });
+  await adminProductSchemaReady;
+}
+
 async function findReferrerByCode(code: string) {
   const parent = await queryOne<AnyRow>(
     "SELECT id AS parent_id FROM users WHERE UPPER(konnekt_kode) = ? LIMIT 1",
@@ -527,12 +759,40 @@ async function findReferrerByCode(code: string) {
 
 export async function updateRedemptionStatus(redemptionId: number, status: "issued" | "redeemed" | "cancelled" | "expired") {
   await requireAdmin();
-  await executeQuery("UPDATE redemptions SET status = ? WHERE id = ?", [status, redemptionId]);
+  await ensureAdminProductSchemaOnce();
+  const redemption = await queryOne<AnyRow>(
+    `SELECT r.brand_name, r.coupon_code, k.parent_id
+     FROM redemptions r
+     JOIN kids k ON k.id = r.kid_id
+     WHERE r.id = ?
+     LIMIT 1`,
+    [redemptionId],
+  );
+  await executeQuery(
+    `
+      UPDATE redemptions
+      SET status = ?,
+          redeemed_at = CASE
+            WHEN ? = 'redeemed' THEN NOW()
+            WHEN ? = 'issued' THEN NULL
+            ELSE redeemed_at
+          END
+      WHERE id = ?
+    `,
+    [status, status, status, redemptionId],
+  );
+
+  await notifyUser(num(redemption?.parent_id), {
+    title: "Voucher status updated",
+    body: `${str(redemption?.brand_name) || "Your voucher"} is now ${status}.`,
+    url: "/app?tab=Account",
+    tag: `redemption-${redemptionId}-${status}`,
+  });
 }
 
 export async function checkInBooking(bookingId: number) {
   await requireAdmin();
-  await ensureAdminProductSchema();
+  await ensureAdminProductSchemaOnce();
 
   const booking = await queryOne<AnyRow>(
     `SELECT b.*, e.title AS event_title
@@ -567,6 +827,16 @@ export async function checkInBooking(bookingId: number) {
       ],
     );
   }
+
+  await notifyUser(num(booking.user_id), {
+    title: "Activity check-in complete",
+    body:
+      attendancePoints > 0
+        ? `${attendancePoints} points credited for ${str(booking.event_title) || "your activity"}.`
+        : `Check-in completed for ${str(booking.event_title) || "your activity"}.`,
+    url: "/app?tab=Activities",
+    tag: `booking-checkin-${bookingId}`,
+  });
 }
 
 async function generateKidCode(kidId: number) {
@@ -580,7 +850,7 @@ async function generateKidCode(kidId: number) {
   return `KK-${base}-${Date.now().toString(36).toUpperCase()}`;
 }
 
-function mapMember(row: AnyRow): AdminMember {
+function mapMember(row: AnyRow, kids: AdminKid[]): AdminMember {
   const father = str(row.father_name) || str(row.parent_name);
   const mother = str(row.mother_name);
   return {
@@ -595,16 +865,18 @@ function mapMember(row: AnyRow): AdminMember {
     plan: "Member",
     code: str(row.konnekt_kode) || "KK-XXXXX",
     active: true,
+    kids,
   };
 }
 
-function mapPendingKid(row: AnyRow): AdminKid {
+function mapAdminKid(row: AnyRow): AdminKid {
   const id = num(row.id);
-  const photoData = str(row.photo_data);
-  const schoolIdData = str(row.school_id_card_data);
+  const hasPhotoData = row.has_photo_data === true || str(row.has_photo_data) === "true" || Boolean(str(row.photo_data));
+  const hasSchoolIdData = row.has_school_id_card_data === true || str(row.has_school_id_card_data) === "true" || Boolean(str(row.school_id_card_data));
 
   return {
     id,
+    parentId: num(row.parent_id),
     initials: initials(str(row.child_name)),
     name: str(row.child_name) || "Child",
     age: `${num(row.age)} years`,
@@ -612,14 +884,34 @@ function mapPendingKid(row: AnyRow): AdminKid {
     dob: row.dob ? formatDate(row.dob) : "-",
     school: str(row.school) || "-",
     schoolId: str(row.school_id_card) || "-",
-    photo: photoData ? adminKidFileUrl(id, "photo") : previewablePublicPath(str(row.photo)),
-    schoolIdPreview: schoolIdData ? adminKidFileUrl(id, "schoolId") : previewablePublicPath(str(row.school_id_card)),
+    photo: hasPhotoData ? adminKidFileUrl(id, "photo") : previewablePublicPath(str(row.photo)),
+    schoolIdPreview: hasSchoolIdData ? adminKidFileUrl(id, "schoolId") : previewablePublicPath(str(row.school_id_card)),
     parent: str(row.parent_name) || [str(row.father_name), str(row.mother_name)].filter(Boolean).join(" & ") || "Parent",
     phone: formatPhone(str(row.mobile)),
     locality: str(row.locality) || str(row.city) || "-",
     requested: formatRelative(row.created_at),
-    status: "pending",
+    points: num(row.konnekt_points),
+    status: normalizeKidStatus(row.status),
   };
+}
+
+function groupKidsByParent(kids: AdminKid[]) {
+  const grouped = new Map<number, AdminKid[]>();
+  for (const kid of kids) {
+    const existing = grouped.get(kid.parentId);
+    if (existing) {
+      existing.push(kid);
+    } else {
+      grouped.set(kid.parentId, [kid]);
+    }
+  }
+  return grouped;
+}
+
+function normalizeKidStatus(value: unknown): AdminKid["status"] {
+  const status = str(value);
+  if (status === "approved" || status === "rejected" || status === "pending") return status;
+  return "pending";
 }
 
 function mapEvent(row: AnyRow): AdminEvent {
@@ -632,6 +924,7 @@ function mapEvent(row: AnyRow): AdminEvent {
     date: validDate ? formatDate(row.event_date) : "Date TBA",
     dateValue: validDate ? validDate.toISOString().slice(0, 10) : "",
     timeValue: validDate ? validDate.toTimeString().slice(0, 5) : "",
+    image: publicPath(str(row.image)),
     category: str(row.category) || "Experience",
     price: num(row.price),
     capacity: num(row.capacity),
@@ -647,6 +940,10 @@ function mapEvent(row: AnyRow): AdminEvent {
 function mapParticipant(row: AnyRow): AdminParticipant {
   return {
     id: num(row.id),
+    eventId: num(row.event_id),
+    eventTitle: str(row.event_title) || "Event",
+    eventDate: formatShortDate(row.event_date),
+    eventLocation: str(row.event_location),
     participant: str(row.child_name),
     parent: str(row.parent_name),
     phone: formatPhone(str(row.mobile)),
@@ -686,6 +983,8 @@ function mapBrand(row: AnyRow): AdminBrand {
     name,
     email: str(row.email) || "No login user",
     code: str(row.referral_code) || `REF-${name.replace(/[^a-z0-9]/gi, "").slice(0, 3).toUpperCase() || "BRD"}`,
+    description: str(row.description),
+    note: str(row.note),
     color: name.toLowerCase().includes("domino") ? "bg-[#f4484d]" : "bg-[#6754d6]",
     icon: name.toLowerCase().includes("pizza") || name.toLowerCase().includes("domino") ? "Pizza" : "Gift",
     logo: publicPath(str(row.logo)),
@@ -727,6 +1026,7 @@ function normalizeEventInput(input: Record<string, unknown>) {
     capacity: input.capacity ? Number(input.capacity) : null,
     category: clean(input.category) || "Experience",
     description: clean(input.description),
+    image: cleanImageData(input.image) || "",
     minAge: input.minAge ? Number(input.minAge) : null,
     maxAge: input.maxAge ? Number(input.maxAge) : null,
     gender: clean(input.gender) || "All",

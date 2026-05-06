@@ -23,10 +23,15 @@ export type RegisterDetails = {
 };
 
 export type ParentSignupDetails = {
+  fatherName: string;
+  motherName: string;
   fullName: string;
   email: string;
   phone: string;
+  alternateMobile: string;
+  address: string;
   cityArea: string;
+  pincode: string;
   referralCode: string;
 };
 
@@ -94,23 +99,29 @@ export async function createParentAccount(details: ParentSignupDetails) {
   const existing = await findUserByPhone(details.phone);
   if (existing) return Number(existing.id);
 
-  const parentName = details.fullName || "Konnectly Parent";
+  const parentName = details.fullName || [details.fatherName, details.motherName].filter(Boolean).join(" & ") || "Konnectly Parent";
+  const locality = details.cityArea;
   const kode = await generateParentReferralCode(parentName);
 
   const inserted = await queryOne<{ id: number }>(
     `
     INSERT INTO users
-      (email, mobile, password, parent_name, locality, city, block_sector, konnekt_kode, role)
+      (email, mobile, password, parent_name, father_name, mother_name, alternate_mobile, address, locality, city, pincode, block_sector, konnekt_kode, role)
     VALUES
-      (?, ?, NULL, ?, ?, ?, ?, ?, 'user')
+      (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'user')
     RETURNING id
     `,
     [
-      details.email,
+      details.email || null,
       details.phone,
       parentName,
-      details.cityArea,
-      details.cityArea,
+      details.fatherName || null,
+      details.motherName || null,
+      details.alternateMobile || null,
+      details.address || null,
+      locality || null,
+      locality || null,
+      details.pincode || null,
       details.referralCode || null,
       kode,
     ],
