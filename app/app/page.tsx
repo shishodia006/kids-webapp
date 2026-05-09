@@ -1607,7 +1607,7 @@ function EditParentSheet({ data, onClose, onSaved }: { data: AppData; onClose: (
         <h2 className="text-xl font-black text-[#292444]">Edit Parent Profile</h2>
         <p className="mt-2 text-sm font-bold text-[#8d89a6]">Mobile number stays locked because it is used for login.</p>
         <div className="mt-5 grid gap-3">
-          <SheetInput label="Parent Name" value={parentName} onChange={setParentName} placeholder="Parent name" />
+          {/* <SheetInput label="Parent Name" value={parentName} onChange={setParentName} placeholder="Parent name" /> */}
           <SheetInput label="Email" value={email} onChange={setEmail} placeholder="parent@example.com" type="email" required={false} />
           <SheetInput label="Father Name" value={fatherName} onChange={setFatherName} placeholder="Father name" required={false} />
           <SheetInput label="Mother Name" value={motherName} onChange={setMotherName} placeholder="Mother name" required={false} />
