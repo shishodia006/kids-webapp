@@ -67,12 +67,12 @@ export default function UserApp() {
   const [addKidOpen, setAddKidOpen] = useState(false);
   const [editParentOpen, setEditParentOpen] = useState(false);
   const [editingKid, setEditingKid] = useState<AppKid | null>(null);
-  const [widgetOpen, setWidgetOpen] = useState(false);
   const [selectedPass, setSelectedPass] = useState<AppBooking | null>(null);
   const [currentTime, setCurrentTime] = useState("");
   const [installWorking, setInstallWorking] = useState(false);
   const [installMessage, setInstallMessage] = useState("");
   const [appInstalled, setAppInstalled] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
 
   const setInitialNav = useCallback((nextData: AppData) => {
     if (navInitializedRef.current) return;
@@ -95,7 +95,6 @@ export default function UserApp() {
       setData(nextData);
       cacheAppData(nextData);
       setInitialNav(nextData);
-      setWidgetOpen(Boolean(nextData.showWidgetSetup));
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to load app data.");
@@ -110,7 +109,6 @@ export default function UserApp() {
       window.setTimeout(() => {
         setData(cached);
         setInitialNav(cached);
-        setWidgetOpen(Boolean(cached.showWidgetSetup));
         setStatus("");
       }, 0);
     }
@@ -129,6 +127,13 @@ export default function UserApp() {
     updateTime();
     const timer = window.setInterval(updateTime, 30000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setNotificationPermission("Notification" in window ? Notification.permission : "unsupported");
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -165,7 +170,6 @@ export default function UserApp() {
       const installed = isStandaloneApp() || window.konnectlyIsAppInstalled?.() === true;
       setAppInstalled(installed);
       if (installed) {
-        setWidgetOpen(false);
         setInstallMessage(APP_ALREADY_INSTALLED_MESSAGE);
       }
     }
@@ -209,11 +213,6 @@ export default function UserApp() {
     }
   }
 
-  async function dismissWidget() {
-    await postJson("/api/app/widget/dismiss", {});
-    setWidgetOpen(false);
-  }
-
   async function handleInstallApp(showFallback = true) {
     setStatus("");
     setInstallMessage("Checking install option...");
@@ -224,7 +223,6 @@ export default function UserApp() {
         setAppInstalled(true);
         setStatus(APP_ALREADY_INSTALLED_MESSAGE);
         setInstallMessage(APP_ALREADY_INSTALLED_MESSAGE);
-        setWidgetOpen(false);
         return true;
       }
 
@@ -232,7 +230,6 @@ export default function UserApp() {
       if (installed) {
         const message = "Konnectly app install ho gaya hai. Ab aap ise home screen se one-tap open kar sakte hain.";
         setAppInstalled(true);
-        setWidgetOpen(false);
         setStatus(message);
         setInstallMessage(message);
         return true;
@@ -240,18 +237,13 @@ export default function UserApp() {
 
       const message = "Browser install prompt is not available right now. Use browser menu > Install app or Add to home screen.";
       setInstallMessage(message);
-      if (showFallback) {
-        setWidgetOpen(true);
-      } else {
-        setStatus(message);
-      }
+      if (showFallback) setStatus(message);
 
       return false;
     } catch {
       const message = "Unable to open install prompt here. Use browser menu > Install app or Add to home screen.";
       setInstallMessage(message);
-      if (showFallback) setWidgetOpen(true);
-      else setStatus(message);
+      setStatus(message);
       return false;
     } finally {
       setInstallWorking(false);
@@ -265,7 +257,9 @@ export default function UserApp() {
     }
 
     const permission = window.konnectlyRequestNotifications ? await window.konnectlyRequestNotifications() : await Notification.requestPermission();
+    setNotificationPermission(permission);
     if (permission === "granted" || Notification.permission === "granted") {
+      setNotificationPermission("granted");
       setStatus("Notifications enabled for this profile.");
       return;
     }
@@ -335,7 +329,7 @@ export default function UserApp() {
         <div className="min-h-0 flex-1 overflow-y-auto pb-22 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {status && <div className="m-4 rounded-[18px] bg-white p-4 text-sm font-black text-[#5f4bd2] shadow-sm ring-1 ring-[#e9e4fb]">{status}</div>}
           {data && selectedPass && <EventPassScreen booking={selectedPass} onBack={() => setSelectedPass(null)} />}
-          {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onOpenPointsHistory={() => setPointsHistoryOpen(true)} onRedeem={redeem} onOpenVoucher={setVoucher} onOpenActivities={() => setActiveNav("Activities")} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} appInstalled={appInstalled} />}
+          {data && !selectedPass && activeNav === "Home" && <HomeContent data={data} onOpenRefer={() => setReferOpen(true)} onOpenPointsHistory={() => setPointsHistoryOpen(true)} onRedeem={redeem} onOpenVoucher={setVoucher} onOpenActivities={() => setActiveNav("Activities")} onInstallApp={handleInstallApp} onEnableNotifications={enableNotifications} installWorking={installWorking} installMessage={installMessage} appInstalled={appInstalled} notificationPermission={notificationPermission} />}
           {data && !selectedPass && activeNav === "Activities" && <ActivitiesScreen data={data} onBook={bookEvent} onOpenPass={setSelectedPass} />}
           {data && !selectedPass && activeNav === "Updates" && <UpdatesScreen notifications={data.notifications} />}
           {data && !selectedPass && activeNav === "Account" && (
@@ -343,14 +337,15 @@ export default function UserApp() {
               data={data}
               onSwitchKid={switchKid}
               onDataChanged={loadData}
-              onAddKidSheet={() => setAddKidOpen(true)}
               onEditParentSheet={() => setEditParentOpen(true)}
               onOpenVoucher={setVoucher}
               onOpenRefer={() => setReferOpen(true)}
               onOpenUpdates={() => setActiveNav("Updates")}
               onInstallApp={handleInstallApp}
+              onEnableNotifications={enableNotifications}
               installWorking={installWorking}
               appInstalled={appInstalled}
+              notificationPermission={notificationPermission}
             />
           )}
         </div>
@@ -372,7 +367,7 @@ export default function UserApp() {
         {data && addKidOpen && <AddKidSheet onClose={() => setAddKidOpen(false)} onSaved={async () => { setAddKidOpen(false); await loadData(); }} />}
         {data && editParentOpen && <EditParentSheet data={data} onClose={() => setEditParentOpen(false)} onSaved={async () => { setEditParentOpen(false); await loadData(); }} />}
         {editingKid && <EditKidSheet kid={editingKid} onClose={() => setEditingKid(null)} onSaved={async () => { setEditingKid(null); await loadData(); }} />}
-        {widgetOpen && <WidgetPrompt onClose={dismissWidget} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} appInstalled={appInstalled} />}
+        {false && <WidgetPrompt onClose={() => undefined} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} appInstalled={appInstalled} />}
       </section>
     </main>
   );
@@ -514,9 +509,11 @@ function HomeContent({
   onOpenVoucher,
   onOpenActivities,
   onInstallApp,
+  onEnableNotifications,
   installWorking,
   installMessage,
   appInstalled,
+  notificationPermission,
 }: {
   data: AppData;
   onOpenRefer: () => void;
@@ -525,9 +522,11 @@ function HomeContent({
   onOpenVoucher: (voucher: Voucher) => void;
   onOpenActivities: () => void;
   onInstallApp: () => void;
+  onEnableNotifications: () => void;
   installWorking: boolean;
   installMessage: string;
   appInstalled: boolean;
+  notificationPermission: NotificationPermission | "unsupported";
 }) {
   const activeKid = data.activeKid;
   const nextEvent = data.events[0];
@@ -572,6 +571,15 @@ function HomeContent({
       <ActiveVouchers history={data.rewardHistory} onOpenVoucher={onOpenVoucher} compact />
 
       <ActionCard tone="gold" icon={<Gift size={24} />} title="Refer to Earn Points!" body="Invite a family and share your KonnektKode" onClick={onOpenRefer} />
+      {notificationPermission !== "granted" && notificationPermission !== "unsupported" && (
+        <ActionCard
+          tone="purple"
+          icon={<Bell size={24} />}
+          title="Enable Phone Notifications"
+          body="Get admin updates even when Konnectly is closed"
+          onClick={onEnableNotifications}
+        />
+      )}
       <ActionCard
         tone="purple"
         icon={<Download size={25} />}
@@ -776,6 +784,7 @@ function PastList({ events }: { events: AppEvent[] }) {
 }
 
 function EventPassScreen({ booking, onBack }: { booking: AppBooking; onBack: () => void }) {
+  const checkInUrl = typeof window === "undefined" ? booking.qrToken : `${window.location.origin}/admin/check-in?token=${encodeURIComponent(booking.qrToken)}`;
   return (
     <div className="px-5 py-5">
       <div className="relative mx-auto max-w-[340px] overflow-hidden rounded-[28px] bg-white shadow-sm ring-1 ring-[#e9e4fb]">
@@ -786,7 +795,7 @@ function EventPassScreen({ booking, onBack }: { booking: AppBooking; onBack: () 
         <div className="px-6 py-7 text-center">
           <p className="text-[10px] font-black uppercase tracking-[0.22em] text-[#8d89a6]">Scan at check-in</p>
           <div className="mx-auto mt-4 grid h-56 w-56 place-items-center rounded-[28px] border border-[#eee9fb] bg-[#fbfaff] p-3 shadow-sm">
-            <QrMock seed={booking.qrToken} />
+            <QrMock seed={checkInUrl} />
           </div>
           <h2 className="mt-7 text-2xl font-black text-[#292444]">{booking.childName}</h2>
           <p className="mt-2 text-xs font-black uppercase tracking-[0.2em] text-[#8d89a6]">Ticket ID</p>
@@ -832,26 +841,28 @@ function AccountScreen({
   data,
   onSwitchKid,
   onDataChanged,
-  onAddKidSheet,
   onEditParentSheet,
   onOpenVoucher,
   onOpenRefer,
   onOpenUpdates,
   onInstallApp,
+  onEnableNotifications,
   installWorking,
   appInstalled,
+  notificationPermission,
 }: {
   data: AppData;
   onSwitchKid: (id: number) => void;
   onDataChanged: () => Promise<void>;
-  onAddKidSheet: () => void;
   onEditParentSheet: () => void;
   onOpenVoucher: (voucher: Voucher) => void;
   onOpenRefer: () => void;
   onOpenUpdates: () => void;
   onInstallApp: () => void;
+  onEnableNotifications: () => void;
   installWorking: boolean;
   appInstalled: boolean;
+  notificationPermission: NotificationPermission | "unsupported";
 }) {
   const [openPanel, setOpenPanel] = useState<AccountPanel>("");
 
@@ -885,25 +896,41 @@ function AccountScreen({
         {data.kids.length === 0 && <EmptyState text="No kid profiles found for this account." />}
         {data.kids.map((kid) => {
           const active = data.activeKid?.id === kid.id;
+          const editing = openPanel === `kid-${kid.id}`;
           return (
-            <button
-              key={kid.id}
-              onClick={() => onSwitchKid(kid.id)}
-              className={`flex w-full items-center gap-2.5 rounded-[22px] border-2 bg-white p-3 text-left shadow-sm transition active:scale-[0.99] ${
-                active ? "border-[#f6c400]" : "border-transparent ring-1 ring-[#e9e4fb]"
-              }`}
-              type="button"
-            >
-              <KidAvatar kid={kid} size={50} />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-black text-[#292444]">
-                  {kid.childName}
-                  {active && <span className="ml-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#c99000]">- Active</span>}
-                </span>
-                <span className="mt-0.5 block truncate text-[11px] font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
-              </span>
-              <span className="shrink-0 rounded-full bg-[#eee7ff] px-2.5 py-1.5 text-[11px] font-black text-[#5f4bd2]">Age {kid.age || "-"}</span>
-            </button>
+            <div key={kid.id} className={`overflow-hidden rounded-[22px] border-2 bg-white shadow-sm ${active ? "border-[#f6c400]" : "border-transparent ring-1 ring-[#e9e4fb]"}`}>
+              <div className="flex w-full items-center gap-2.5 p-3">
+                <button
+                  onClick={() => onSwitchKid(kid.id)}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left transition active:scale-[0.99]"
+                  type="button"
+                >
+                  <KidAvatar kid={kid} size={50} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-black text-[#292444]">
+                      {kid.childName}
+                      {active && <span className="ml-1.5 text-[10px] font-black uppercase tracking-[0.12em] text-[#c99000]">- Active</span>}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[11px] font-bold text-[#8d89a6]">{kid.school || "School not added"}</span>
+                  </span>
+                  <span className="hidden shrink-0 rounded-full bg-[#eee7ff] px-2.5 py-1.5 text-[11px] font-black text-[#5f4bd2] sm:inline-flex">Age {kid.age || "-"}</span>
+                </button>
+                <button
+                  onClick={() => togglePanel(`kid-${kid.id}`)}
+                  className={`shrink-0 rounded-full px-3 py-2 text-[11px] font-black transition ${
+                    editing ? "bg-[#6754d6] text-white" : "bg-[#eee7ff] text-[#5f4bd2]"
+                  }`}
+                  type="button"
+                >
+                  {editing ? "Close" : "Edit"}
+                </button>
+              </div>
+              {editing && (
+                <div className="border-t border-[#eee9fb] px-3 pb-3">
+                  <InlineKidProfileForm kid={kid} onSaved={refreshProfiles} />
+                </div>
+              )}
+            </div>
           );
         })}
 
@@ -929,20 +956,6 @@ function AccountScreen({
         >
           <InlineParentProfileForm data={data} onSaved={refreshProfiles} />
         </ProfileAccordionCard>
-
-        {data.kids.map((kid) => (
-          <ProfileAccordionCard
-            key={kid.id}
-            icon={<KidAvatar kid={kid} size={42} />}
-            title={`Edit ${kid.childName || "Kid"}`}
-            subtitle={kid.konnektKode || (kid.status === "approved" ? "Verified profile" : "ID Pending Review")}
-            badge={kid.status === "approved" ? "Verified" : "Pending"}
-            open={openPanel === `kid-${kid.id}`}
-            onToggle={() => togglePanel(`kid-${kid.id}`)}
-          >
-            <InlineKidProfileForm kid={kid} onSaved={refreshProfiles} />
-          </ProfileAccordionCard>
-        ))}
       </section>
 
       <ActiveVouchers history={data.rewardHistory} onOpenVoucher={onOpenVoucher} />
@@ -956,7 +969,15 @@ function AccountScreen({
           onClick={onInstallApp}
           disabled={installWorking || appInstalled}
         />
-        <AccountActionCard icon={<Plus size={19} />} title="Add Another Child" tone="purple" onClick={onAddKidSheet} disabled={data.kids.length >= 3} />
+        {notificationPermission !== "granted" && notificationPermission !== "unsupported" && (
+          <AccountActionCard
+            icon={<Bell size={19} />}
+            title="Enable Phone Notifications"
+            body="Admin updates will pop up like app alerts"
+            tone="purple"
+            onClick={onEnableNotifications}
+          />
+        )}
         <AccountActionCard icon={<Bell size={19} />} title="Updates & Alerts" tone="amber" onClick={onOpenUpdates} />
         <AccountActionCard icon={<Gift size={19} />} title="Refer a Family & Earn" tone="green" onClick={onOpenRefer} />
         <AccountActionCard icon={<LogOut size={19} />} title="Sign Out" tone="red" onClick={signOut} />
@@ -1137,7 +1158,7 @@ function InlineAddKidForm({ onCancel, onSaved }: { onCancel: () => void; onSaved
         {ageInvalid && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Age cannot be more than 18 years.</p>}
         <KidFormInput label="School Name" value={school} onChange={setSchool} placeholder="e.g. DPS R.K. Puram" />
         <ProfileSelect label="Gender" value={gender} onChange={setGender} options={["All", "Boy", "Girl"]} />
-        <ProfileFileDrop label={schoolIdCard ? schoolIdCard : "Tap to upload School ID"} onFile={(file) => uploadFile(file, "schoolId")} />
+        <ProfileFileDrop label={schoolIdCard ? schoolIdCard : "Tap to upload School ID"} preview={schoolIdCardData} onFile={(file) => uploadFile(file, "schoolId")} />
       </div>
 
       {status && <p className="mt-3 rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black leading-5 text-[#6655cf]">{status}</p>}
@@ -1216,6 +1237,8 @@ function InlineKidProfileForm({ kid, onSaved }: { kid: AppKid; onSaved: () => Pr
   const [dob, setDob] = useState(toDateInputValue(kid.dob));
   const [school, setSchool] = useState(kid.school);
   const [gender, setGender] = useState(kid.gender || "All");
+  const [schoolIdCard, setSchoolIdCard] = useState("");
+  const [schoolIdCardData, setSchoolIdCardData] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -1224,13 +1247,28 @@ function InlineKidProfileForm({ kid, onSaved }: { kid: AppKid; onSaved: () => Pr
     setLoading(true);
     setStatus("");
     try {
-      await postJson("/api/app/kids/update", { kidId: kid.id, childName, dob, school, gender });
+      await postJson("/api/app/kids/update", { kidId: kid.id, childName, dob, school, gender, schoolIdCard, schoolIdCardData });
       await onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to update kid profile.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function uploadSchoolId(file: File | undefined) {
+    setStatus("");
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setStatus("File size should be 5MB or less.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSchoolIdCard(file.name);
+      setSchoolIdCardData(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -1241,6 +1279,11 @@ function InlineKidProfileForm({ kid, onSaved }: { kid: AppKid; onSaved: () => Pr
         <ProfileSelect label="Gender" value={gender} onChange={setGender} options={["All", "Boy", "Girl"]} />
       </div>
       <SheetInput label="School Name" value={school} onChange={setSchool} placeholder="School name" />
+      <ProfileFileDrop
+        label={schoolIdCard ? schoolIdCard : "Replace School ID"}
+        preview={schoolIdCardData || kid.schoolIdCard}
+        onFile={uploadSchoolId}
+      />
       <p className="rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black text-[#8d89a6]">Status: {kid.status === "approved" ? "Verified" : "Pending Review"} - Age {kid.age || "-"}</p>
       {status && <p className="text-xs font-black text-[#6655cf]">{status}</p>}
       <button disabled={loading || !childName.trim() || !dob || !school.trim()} className="rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
@@ -1261,16 +1304,39 @@ function ProfileSelect({ label, value, onChange, options }: { label: string; val
   );
 }
 
-function ProfileFileDrop({ label, onFile }: { label: string; onFile: (file: File | undefined) => void }) {
+function ProfileFileDrop({ label, preview, onFile }: { label: string; preview?: string; onFile: (file: File | undefined) => void }) {
   return (
-    <label className="grid min-h-28 place-items-center rounded-[22px] border-2 border-dashed border-[#bdb2f4] bg-[#f7f5ff] px-4 py-5 text-center">
-      <input type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(event) => { event.currentTarget.blur(); onFile(event.target.files?.[0]); }} />
-      <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-[#5f4bd2] shadow-sm">
-        <Paperclip size={21} />
-      </span>
-      <span className="mt-3 text-sm font-black text-[#5f4bd2]">{label}</span>
-      <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF, JPG or PNG - Max 5MB</span>
-    </label>
+    <div className="grid gap-2">
+      {preview && <SchoolIdPreview value={preview} />}
+      <label className="grid min-h-28 place-items-center rounded-[22px] border-2 border-dashed border-[#bdb2f4] bg-[#f7f5ff] px-4 py-5 text-center">
+        <input type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(event) => { event.currentTarget.blur(); onFile(event.target.files?.[0]); }} />
+        <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-[#5f4bd2] shadow-sm">
+          <Paperclip size={21} />
+        </span>
+        <span className="mt-3 text-sm font-black text-[#5f4bd2]">{label}</span>
+        <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF, JPG or PNG - Max 5MB</span>
+      </label>
+    </div>
+  );
+}
+
+function SchoolIdPreview({ value }: { value: string }) {
+  const isPdf = value.startsWith("data:application/pdf") || value.toLowerCase().endsWith(".pdf");
+  return (
+    <div className="overflow-hidden rounded-[18px] border border-[#e9e4fb] bg-white p-3">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="text-[11px] font-black uppercase tracking-[0.12em] text-[#8d89a6]">School ID Preview</p>
+        <a href={value} target="_blank" rel="noreferrer" className="text-[11px] font-black text-[#5f4bd2]">Open</a>
+      </div>
+      {isPdf ? (
+        <div className="flex items-center gap-3 rounded-2xl bg-[#f7f5ff] p-3 text-left">
+          <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-[#5f4bd2]"><Paperclip size={22} /></span>
+          <span className="text-xs font-black text-[#292444]">PDF selected. Tap Open to review full ID.</span>
+        </div>
+      ) : (
+        <img src={value} alt="School ID preview" className="max-h-44 w-full rounded-2xl object-contain bg-[#f7f5ff]" />
+      )}
+    </div>
   );
 }
 
@@ -1329,7 +1395,7 @@ function ActiveVouchers({ history, onOpenVoucher, compact }: { history: AppRewar
     <section>
       <div className="mb-2.5 flex items-center justify-between gap-3">
         <h2 className="text-sm font-black text-[#292444]">Active Vouchers</h2>
-        <span className="text-[11px] font-black text-[#16a34a]">QR valid for 15 days</span>
+        <span className="shrink-0 text-[11px] font-black text-[#16a34a]">QR valid for 15 days</span>
       </div>
       <div className="space-y-2.5">
         {activeVouchers.map((entry) => {
@@ -1338,18 +1404,18 @@ function ActiveVouchers({ history, onOpenVoucher, compact }: { history: AppRewar
             <button
               key={entry.id}
               onClick={() => onOpenVoucher(voucher)}
-              className="flex w-full items-center gap-3 rounded-[20px] bg-white p-3 text-left shadow-sm ring-1 ring-[#e9e4fb] transition active:scale-[0.99]"
+              className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[20px] bg-white p-2.5 text-left shadow-sm ring-1 ring-[#e9e4fb] transition active:scale-[0.99] sm:gap-3 sm:p-3"
               type="button"
             >
-              <span className={`grid shrink-0 place-items-center rounded-2xl bg-[#f7f5ff] ${compact ? "h-16 w-16" : "h-20 w-20"}`}>
+              <span className={`grid shrink-0 place-items-center rounded-2xl bg-[#f7f5ff] ${compact ? "h-14 w-14" : "h-16 w-16"}`}>
                 <QrMock seed={entry.qrCode || entry.voucherCode} small />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-black text-[#292444]">{entry.brandName} Voucher</span>
                 <span className="mt-1 block truncate text-[11px] font-black tracking-[0.12em] text-[#5f4bd2]">{entry.voucherCode}</span>
-                <span className="mt-1 block text-[11px] font-bold text-[#8d89a6]">{formatVoucherValidity(entry)}</span>
+                <span className="mt-1 block truncate text-[11px] font-bold text-[#8d89a6]">{formatVoucherValidity(entry)}</span>
               </span>
-              <span className="shrink-0 rounded-full bg-green-100 px-3 py-1.5 text-[10px] font-black text-green-700">View QR</span>
+              <span className="shrink-0 rounded-full bg-green-100 px-2.5 py-1.5 text-[10px] font-black text-green-700 sm:px-3">View QR</span>
             </button>
           );
         })}
@@ -1504,6 +1570,7 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
             {ageInvalid && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Age cannot be more than 18 years.</p>}
             <KidFormInput label="School Name" value={school} onChange={setSchool} placeholder="e.g. DPS R.K. Puram" />
 
+            {schoolIdCardData && <SchoolIdPreview value={schoolIdCardData} />}
             <label className="grid min-h-32 place-items-center rounded-[22px] border-2 border-dashed border-[#bdb2f4] bg-[#f7f5ff] px-4 py-5 text-center">
               <input type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(event) => { event.currentTarget.blur(); uploadFile(event.target.files?.[0], "schoolId"); }} />
               <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-[#5f4bd2] shadow-sm">
@@ -1570,7 +1637,7 @@ function KidFormInput({
 
 function EditParentSheet({ data, onClose, onSaved }: { data: AppData; onClose: () => void; onSaved: () => void }) {
   const user = data.user;
-  const [parentName, setParentName] = useState(user.parentName);
+  const parentName = user.parentName;
   const [email, setEmail] = useState(user.email);
   const [fatherName, setFatherName] = useState(user.fatherName);
   const [motherName, setMotherName] = useState(user.motherName);
@@ -1637,6 +1704,8 @@ function EditKidSheet({ kid, onClose, onSaved }: { kid: AppKid; onClose: () => v
   const [dob, setDob] = useState(toDateInputValue(kid.dob));
   const [school, setSchool] = useState(kid.school);
   const [gender, setGender] = useState(kid.gender || "All");
+  const [schoolIdCard, setSchoolIdCard] = useState("");
+  const [schoolIdCardData, setSchoolIdCardData] = useState("");
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -1645,13 +1714,28 @@ function EditKidSheet({ kid, onClose, onSaved }: { kid: AppKid; onClose: () => v
     setLoading(true);
     setStatus("");
     try {
-      await postJson("/api/app/kids/update", { kidId: kid.id, childName, dob, school, gender });
+      await postJson("/api/app/kids/update", { kidId: kid.id, childName, dob, school, gender, schoolIdCard, schoolIdCardData });
       await onSaved();
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to update kid profile.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function uploadSchoolId(file: File | undefined) {
+    setStatus("");
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setStatus("File size should be 5MB or less.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setSchoolIdCard(file.name);
+      setSchoolIdCardData(typeof reader.result === "string" ? reader.result : "");
+    };
+    reader.readAsDataURL(file);
   }
 
   return (
@@ -1666,6 +1750,7 @@ function EditKidSheet({ kid, onClose, onSaved }: { kid: AppKid; onClose: () => v
           <SheetInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="As per school records" />
           <SheetInput label="Date of Birth" value={dob} onChange={setDob} placeholder="" type="date" />
           <SheetInput label="School Name" value={school} onChange={setSchool} placeholder="School name" />
+          <ProfileFileDrop label={schoolIdCard ? schoolIdCard : "Replace School ID"} preview={schoolIdCardData || kid.schoolIdCard} onFile={uploadSchoolId} />
           <label className="grid gap-1 text-[11px] font-black text-[#292444]">
             Gender
             <select value={gender} onChange={(event) => setGender(event.target.value)} className="h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf]">
@@ -1957,7 +2042,7 @@ function QrMock({ seed, small }: { seed: string; small?: boolean }) {
   }, [qr]);
 
   return (
-    <div className={`grid place-items-center rounded-[16px] bg-white ${small ? "h-20 w-20 p-1" : "h-44 w-44 p-2"} shadow-[inset_0_0_0_1px_rgba(41,36,68,0.08)]`}>
+    <div className={`grid place-items-center rounded-[14px] bg-white ${small ? "h-14 w-14 p-1" : "h-44 w-44 p-2"} shadow-[inset_0_0_0_1px_rgba(41,36,68,0.08)]`}>
       <svg viewBox={`0 0 ${viewSize} ${viewSize}`} role="img" aria-label="Scannable QR code" className="h-full w-full" shapeRendering="crispEdges">
         <rect width={viewSize} height={viewSize} fill="#fff" />
         <path d={darkPath} fill="#111827" />

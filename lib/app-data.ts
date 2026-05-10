@@ -227,7 +227,7 @@ export async function getAppData(origin = ""): Promise<AppData> {
     latestNotification,
     rewardHistory,
     pointHistory,
-    showWidgetSetup: cookieStore.get("konnectly_show_widget_setup")?.value === "1",
+    showWidgetSetup: false,
     razorpayKeyId: process.env.RAZORPAY_KEY_ID ?? "",
     referralUrl: `${origin}/register?ref=${encodeURIComponent(referralCode)}`,
   };
@@ -358,6 +358,8 @@ export async function updateChildProfile(input: Record<string, unknown>) {
   const dob = clean(input.dob);
   const school = clean(input.school);
   const gender = clean(input.gender) || "All";
+  const schoolIdCard = clean(input.schoolIdCard);
+  const schoolIdCardData = clean(input.schoolIdCardData);
 
   if (!childName || !dob || !school) {
     throw new Error("Child name, date of birth, and school name are required.");
@@ -367,14 +369,23 @@ export async function updateChildProfile(input: Record<string, unknown>) {
   if (Number.isNaN(birthDate.getTime())) throw new Error("Please enter a valid date of birth.");
   const age = calculateAge(birthDate);
 
-  const result = await executeQuery(
-    `
-    UPDATE kids
-    SET child_name = ?, dob = ?, age = ?, school = ?, gender = ?
-    WHERE id = ? AND parent_id = ?
-    `,
-    [childName, birthDate, age, school, gender, kidId, user.id],
-  );
+  const result = schoolIdCard || schoolIdCardData
+    ? await executeQuery(
+      `
+      UPDATE kids
+      SET child_name = ?, dob = ?, age = ?, school = ?, gender = ?, school_id_card = ?, school_id_card_data = ?
+      WHERE id = ? AND parent_id = ?
+      `,
+      [childName, birthDate, age, school, gender, schoolIdCard || null, schoolIdCardData || null, kidId, user.id],
+    )
+    : await executeQuery(
+      `
+      UPDATE kids
+      SET child_name = ?, dob = ?, age = ?, school = ?, gender = ?
+      WHERE id = ? AND parent_id = ?
+      `,
+      [childName, birthDate, age, school, gender, kidId, user.id],
+    );
 
   if (!result.affectedRows) throw new Error("Kid profile not found.");
   await notifyUser(user.id, {
@@ -410,6 +421,30 @@ export async function dismissNotification(notificationId: number) {
 export async function dismissWidgetSetup() {
   const cookieStore = await cookies();
   cookieStore.set("konnectly_show_widget_setup", "", { path: "/", sameSite: "lax", maxAge: 0 });
+}
+
+export async function trackAppInstall(input: Record<string, unknown>) {
+  await ensureProductSchemaOnce();
+  const user = await requireCurrentUser({ parentOnly: true });
+  const installKey = clean(input.installKey) || `user-${user.id}`;
+  const source = clean(input.source).slice(0, 80) || "appinstalled";
+  const userAgent = clean(input.userAgent).slice(0, 500);
+
+  await executeQuery(
+    `
+      INSERT INTO app_installs (user_id, install_key, source, user_agent, installed_at, last_seen_at)
+      VALUES (?, ?, ?, ?, NOW(), NOW())
+      ON CONFLICT (install_key)
+      DO UPDATE SET
+        user_id = EXCLUDED.user_id,
+        source = EXCLUDED.source,
+        user_agent = EXCLUDED.user_agent,
+        last_seen_at = NOW()
+    `,
+    [user.id, installKey, source, userAgent],
+  );
+
+  return { message: "Install tracked." };
 }
 
 export async function savePushSubscription(subscription: unknown) {
@@ -808,6 +843,19 @@ async function ensureProductSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS app_installs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      install_key VARCHAR(120) NOT NULL UNIQUE,
+      source VARCHAR(80),
+      user_agent TEXT,
+      installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_app_installs_user_id ON app_installs (user_id)");
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_app_installs_installed_at ON app_installs (installed_at)");
 }
 
 async function expireIssuedVouchers() {

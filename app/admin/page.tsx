@@ -19,6 +19,7 @@ import {
   Check,
   ChevronDown,
   CirclePlus,
+  Download,
   Gift,
   Grid2X2,
   Link,
@@ -32,6 +33,7 @@ import {
   ShieldCheck,
   Store,
   Target,
+  Trash2,
   Trophy,
   Users,
   X,
@@ -40,7 +42,7 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 
 const ADMIN_FONT_STYLE = { fontFamily: "'Nunito', sans-serif" };
 
-type Section = "Memberships" | "Activities" | "Promotions & Updates" | "Business" | "Referral Dashboard";
+type Section = "Memberships" | "Activities" | "Promotions & Updates" | "Business" | "Referral Dashboard" | "Analytics";
 type Modal = "brand" | "notification" | "referral-settings" | null;
 type MembershipAgeFilter = "all" | "4-6" | "7-9" | "10-12" | "12-18";
 type MembershipPointsFilter = "all" | "0-200" | "200-500" | "500+";
@@ -52,7 +54,7 @@ declare global {
   }
 }
 
-const navItems: { section: Section | "Analytics" | "Settings"; icon: ReactNode; group: "main" | "system" }[] = [
+const navItems: { section: Section | "Settings"; icon: ReactNode; group: "main" | "system" }[] = [
   { section: "Memberships", icon: <Users size={21} />, group: "main" },
   { section: "Activities", icon: <CalendarDays size={21} />, group: "main" },
   { section: "Promotions & Updates", icon: <Megaphone size={21} />, group: "main" },
@@ -84,7 +86,7 @@ export default function AdminPage() {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [editingBrand, setEditingBrand] = useState<AdminBrand | null>(null);
-  const [comingSoon, setComingSoon] = useState<"Analytics" | "Settings" | null>(null);
+  const [comingSoon, setComingSoon] = useState<"Settings" | null>(null);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
 
   async function loadData() {
@@ -133,7 +135,7 @@ export default function AdminPage() {
   }
 
   function selectNav(section: (typeof navItems)[number]["section"]) {
-    if (section === "Analytics" || section === "Settings") {
+    if (section === "Settings") {
       setComingSoon(section);
       return;
     }
@@ -164,6 +166,7 @@ export default function AdminPage() {
     "Promotions & Updates": data?.notifications.length,
     Business: data?.redemptions.length,
     "Referral Dashboard": data?.stats.totalReferrals,
+    Analytics: data?.analytics.appInstalls,
   };
 
   return (
@@ -218,6 +221,10 @@ export default function AdminPage() {
                 onKidStatus={(kidId, nextStatus) =>
                   runAction("Updating child profile...", () => postJson("/api/admin/kids/status", { kidId, status: nextStatus }))
                 }
+                onRemoveMember={(member) => {
+                  if (!window.confirm(`Remove ${member.family}? This deletes the parent account and child profiles, so the same mobile number can register again.`)) return;
+                  void runAction("Removing member profile...", () => requestJson("/api/admin/members", { method: "DELETE", body: { memberId: member.id } }));
+                }}
               />
             )}
             {data && activeSection === "Activities" && (
@@ -256,6 +263,7 @@ export default function AdminPage() {
               />
             )}
             {data && activeSection === "Referral Dashboard" && <ReferralDashboard data={data} />}
+            {data && activeSection === "Analytics" && <Analytics data={data} />}
           </div>
         </section>
       </div>
@@ -300,6 +308,7 @@ function DashboardHeader({
     "Promotions & Updates": "Broadcast updates and review live community notifications",
     Business: "Manage reward partners, vouchers, and redemptions",
     "Referral Dashboard": "Track referral conversions and point awards",
+    Analytics: "Track app installs and high-level platform usage",
   };
 
   return (
@@ -321,7 +330,15 @@ function DashboardHeader({
   );
 }
 
-function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kidId: number, status: "approved" | "rejected") => void }) {
+function Memberships({
+  data,
+  onKidStatus,
+  onRemoveMember,
+}: {
+  data: AdminData;
+  onKidStatus: (kidId: number, status: "approved" | "rejected") => void;
+  onRemoveMember: (member: AdminMember) => void;
+}) {
   const [membershipTab, setMembershipTab] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   const [ageFilter, setAgeFilter] = useState<MembershipAgeFilter>("all");
@@ -346,6 +363,10 @@ function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kid
     setPointsFilter("all");
   }
 
+  function exportFilteredMembers() {
+    downloadCsv(`konnectly-members-${new Date().toISOString().slice(0, 10)}.csv`, buildMembersCsv(filteredMembers));
+  }
+
   return (
     <div className="space-y-5">
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -357,7 +378,12 @@ function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kid
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <SegmentedTabs tabs={["Active Memberships", "Pending Approvals"]} activeIndex={membershipTab} badges={[data.members.length, data.pendingKids.length]} onSelect={setMembershipTab} />
-        {membershipTab === 0 && <MembershipViewToggle viewMode={viewMode} onViewMode={setViewMode} />}
+        {membershipTab === 0 && (
+          <div className="flex flex-wrap items-center gap-3">
+            <PillButton icon={<Download size={17} />} label="Export Filtered" muted onClick={exportFilteredMembers} />
+            <MembershipViewToggle viewMode={viewMode} onViewMode={setViewMode} />
+          </div>
+        )}
       </div>
 
       {membershipTab === 0 ? (
@@ -389,7 +415,7 @@ function Memberships({ data, onKidStatus }: { data: AdminData; onKidStatus: (kid
             <EmptyState text="No memberships match these filters." />
           ) : (
             <div className={viewMode === "grid" ? "grid gap-4 2xl:grid-cols-2" : "space-y-4"}>
-              {filteredMembers.map((member) => <MemberCard key={member.id} member={member} />)}
+              {filteredMembers.map((member) => <MemberCard key={member.id} member={member} onRemove={() => onRemoveMember(member)} />)}
             </div>
           )}
         </div>
@@ -602,6 +628,75 @@ function normalizeSearch(value: string) {
 
 function compactSearch(value: string) {
   return value.replace(/[^a-z0-9]/g, "");
+}
+
+function buildMembersCsv(members: AdminMember[]) {
+  const rows = members.flatMap((member) => {
+    const base = [
+      member.family,
+      member.father,
+      member.fatherPhone,
+      member.mother,
+      member.motherPhone,
+      member.address,
+      member.code,
+      member.plan,
+      member.active ? "Active" : "Inactive",
+    ];
+
+    if (member.kids.length === 0) return [[...base, "", "", "", "", "", "", "", ""]];
+    return member.kids.map((kid) => [
+      ...base,
+      kid.name,
+      kid.age,
+      kid.grade,
+      kid.dob,
+      kid.school,
+      kid.locality,
+      String(kid.points),
+      kid.status,
+    ]);
+  });
+
+  return [
+    [
+      "Family",
+      "Primary Parent",
+      "Primary Phone",
+      "Alternate Parent",
+      "Alternate Phone",
+      "Address",
+      "Konnect Code",
+      "Plan",
+      "Membership Status",
+      "Kid Name",
+      "Kid Age",
+      "Grade",
+      "DOB",
+      "School",
+      "Locality",
+      "Kid Points",
+      "Kid Status",
+    ],
+    ...rows,
+  ]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n");
+}
+
+function csvCell(value: string) {
+  const normalized = value.replace(/\r?\n/g, " ").trim();
+  return /[",\n]/.test(normalized) ? `"${normalized.replace(/"/g, '""')}"` : normalized;
+}
+
+function downloadCsv(fileName: string, csv: string) {
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function PendingApprovals({ kids, onKidStatus }: { kids: AdminKid[]; onKidStatus: (kidId: number, status: "approved" | "rejected") => void }) {
@@ -1346,6 +1441,62 @@ function ReferralDashboard({ data }: { data: AdminData }) {
   );
 }
 
+function Analytics({ data }: { data: AdminData }) {
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard title="App Installs" value={data.analytics.appInstalls.toString()} note="Installed devices tracked" icon={<Download size={24} />} green />
+        <MetricCard title="Installed Users" value={data.analytics.uniqueInstalledUsers.toString()} note="Unique parent accounts" icon={<Users size={24} />} />
+        <MetricCard title="Today" value={data.analytics.installsToday.toString()} note="Installs since midnight" icon={<BarChart3 size={24} />} amber />
+        <MetricCard title="Last 7 Days" value={data.analytics.installsLast7Days.toString()} note="Recent install activity" icon={<CalendarDays size={24} />} />
+      </div>
+
+      <Panel>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black">App Install Analytics</h2>
+            <p className="mt-1 text-sm font-bold text-[#8f8ba6]">
+              Latest install tracked: <span className="text-[#5b45d1]">{data.analytics.latestInstall}</span>
+            </p>
+          </div>
+          <Badge tone="green">{data.analytics.appInstalls} installs</Badge>
+        </div>
+        <div className="mt-5 rounded-2xl bg-[#f8f7ff] p-4 text-sm font-bold leading-6 text-[#8f8ba6]">
+          Counts update when a logged-in parent installs the PWA or opens it from home screen in standalone mode. Browser support can vary, so standalone opens help catch iPhone installs too.
+        </div>
+      </Panel>
+
+      <Panel className="overflow-x-auto p-0">
+        <div className="flex items-center justify-between bg-[#f0ebff] px-6 py-5">
+          <p className="font-black">Installed By</p>
+          <Badge tone="green">{data.analytics.recentInstalls.length} recent</Badge>
+        </div>
+        <table className="w-full min-w-[680px] text-left text-sm">
+          <thead>
+            <tr className="border-t border-[#e7e1fb] text-xs uppercase tracking-[0.2em] text-[#8f8ba6]">
+              {["Parent", "Mobile", "Source", "Installed", "Last Seen"].map((head) => <th key={head} className="px-4 py-3">{head}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {data.analytics.recentInstalls.length === 0 && (
+              <tr><td className="px-4 py-8 text-center font-black text-[#8f8ba6]" colSpan={5}>No app installs tracked yet.</td></tr>
+            )}
+            {data.analytics.recentInstalls.map((install) => (
+              <tr key={install.id} className="border-t border-[#e7e1fb]">
+                <td className="px-4 py-3 font-black">{install.parentName}</td>
+                <td className="px-4 py-3 font-bold">{install.mobile}</td>
+                <td className="px-4 py-3"><Badge tone="soft">{install.source.replace(/_/g, " ")}</Badge></td>
+                <td className="px-4 py-3 font-bold">{install.installedAt}</td>
+                <td className="px-4 py-3 font-bold">{install.lastSeenAt}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Panel>
+    </div>
+  );
+}
+
 function NotificationModal({ onClose, onSubmit }: { onClose: () => void; onSubmit: (body: Record<string, FormDataEntryValue>) => void }) {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1474,7 +1625,7 @@ function NavGroup({
       <div className="flex gap-2 overflow-x-auto pb-2 lg:grid lg:overflow-visible lg:pb-0">
         {items.map((item) => {
           const active = item.section === activeSection;
-          const count = item.section === "Analytics" || item.section === "Settings" ? undefined : counts[item.section];
+          const count = item.section === "Settings" ? undefined : counts[item.section];
           return (
             <button key={item.section} onClick={() => onSelect(item.section)} className={`relative flex min-w-fit items-center gap-2 rounded-2xl px-3 py-2.5 text-left text-xs font-black transition lg:w-full ${active ? "bg-white/18 text-white" : "text-white/60 hover:bg-white/10 hover:text-white"}`} type="button">
               {active && <span className="absolute left-0 top-2 h-8 w-1 rounded-r-full bg-[#f8c400]" />}
@@ -1489,23 +1640,32 @@ function NavGroup({
   );
 }
 
-function MemberCard({ member }: { member: AdminMember }) {
+function MemberCard({ member, onRemove }: { member: AdminMember; onRemove: () => void }) {
   return (
     <Panel className="overflow-hidden p-0">
       <div className="relative bg-white px-4 py-4 sm:px-5">
         <span className="absolute right-6 top-6 h-4 w-4 rounded-full bg-green-500 shadow-lg shadow-green-500/30" />
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-          <Avatar label={member.initials} large />
-          <div className="min-w-0">
-            <h3 className="text-lg font-black sm:text-xl">{member.family}</h3>
-            <p className="mt-2 text-xs font-semibold text-[#8f8ba6] sm:text-sm">Primary: {member.fatherPhone} - Alternate: {member.motherPhone}</p>
-            <p className="mt-1 text-xs font-bold text-[#5b45d1]">{member.address || "Address not added"}</p>
-            <div className="mt-3 flex flex-wrap gap-3">
-              <Badge tone="gold">{member.plan}</Badge>
-              <Badge tone={member.active ? "green" : "gold"}>{member.active ? "Active" : "Inactive"}</Badge>
-              <Badge tone="purple">{member.code}</Badge>
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+            <Avatar label={member.initials} large />
+            <div className="min-w-0">
+              <h3 className="text-lg font-black sm:text-xl">{member.family}</h3>
+              <p className="mt-2 text-xs font-semibold text-[#8f8ba6] sm:text-sm">Primary: {member.fatherPhone} - Alternate: {member.motherPhone}</p>
+              <p className="mt-1 text-xs font-bold text-[#5b45d1]">{member.address || "Address not added"}</p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Badge tone="gold">{member.plan}</Badge>
+                <Badge tone={member.active ? "green" : "gold"}>{member.active ? "Active" : "Inactive"}</Badge>
+                <Badge tone="purple">{member.code}</Badge>
+              </div>
             </div>
           </div>
+          <button
+            onClick={onRemove}
+            className="inline-flex w-fit items-center justify-center gap-2 rounded-full bg-red-50 px-4 py-2 text-xs font-black text-red-600 transition hover:bg-red-100"
+            type="button"
+          >
+            <Trash2 size={16} /> Remove Profile
+          </button>
         </div>
       </div>
       <div className="grid gap-4 border-t border-[#e7e1fb] bg-[#f0ebff] p-4 md:grid-cols-2">
@@ -1817,6 +1977,10 @@ async function postJson(url: string, body: unknown) {
 async function requestJson(url: string, options: { method: "POST" | "PATCH" | "DELETE"; body: unknown }) {
   const response = await fetch(url, { method: options.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(options.body) });
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) {
+    window.location.href = "/admin-login?next=/admin";
+    throw new Error("Admin session expired. Please login again.");
+  }
   if (!response.ok) throw new Error(data.message || "Request failed.");
   return data;
 }

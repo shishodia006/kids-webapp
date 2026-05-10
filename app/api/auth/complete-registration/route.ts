@@ -41,12 +41,6 @@ export async function POST(request: Request) {
     });
 
     response.cookies.set(SESSION_COOKIE_NAME, createSessionToken(phone, "user"), getSessionCookieOptions());
-    response.cookies.set("konnectly_show_widget_setup", "1", {
-      path: "/",
-      sameSite: "lax",
-      maxAge: 60 * 60 * 24,
-    });
-
     return response;
   } catch (error) {
     console.error("COMPLETE_REGISTRATION_ERROR:", error);

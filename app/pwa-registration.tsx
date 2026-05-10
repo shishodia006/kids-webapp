@@ -25,6 +25,7 @@ type KonnectlyNotificationPayload = {
 };
 
 const APP_INSTALL_STORAGE_KEY = "konnectly_app_installed";
+const APP_INSTALL_ID_STORAGE_KEY = "konnectly_app_install_id";
 
 export function PwaRegistration() {
   useEffect(() => {
@@ -40,6 +41,7 @@ export function PwaRegistration() {
 
     function handleAppInstalled() {
       markAppInstalled();
+      void trackAppInstall("appinstalled");
       deferredInstallPrompt = null;
     }
 
@@ -60,6 +62,7 @@ export function PwaRegistration() {
       const choice = await prompt.userChoice;
       if (choice.outcome === "accepted") {
         markAppInstalled();
+        void trackAppInstall("install_prompt_accepted");
         await window.konnectlyRequestNotifications?.();
       }
       return choice.outcome === "accepted";
@@ -105,6 +108,7 @@ export function PwaRegistration() {
     }
 
     registerServiceWorker();
+    if (isStandaloneApp() || hasStoredInstallRecord()) void trackAppInstall(isStandaloneApp() ? "standalone_open" : "stored_install");
 
     return () => {
       active = false;
@@ -137,9 +141,34 @@ function hasStoredInstallRecord() {
 function markAppInstalled() {
   try {
     window.localStorage.setItem(APP_INSTALL_STORAGE_KEY, "true");
+    getInstallId();
   } catch {
     // Installation still succeeds even if storage is unavailable.
   }
+}
+
+function getInstallId() {
+  try {
+    const existing = window.localStorage.getItem(APP_INSTALL_ID_STORAGE_KEY);
+    if (existing) return existing;
+    const next = crypto.randomUUID?.() ?? `install-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(APP_INSTALL_ID_STORAGE_KEY, next);
+    return next;
+  } catch {
+    return "";
+  }
+}
+
+async function trackAppInstall(source: string) {
+  await fetch("/api/app/install", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      installKey: getInstallId(),
+      source,
+      userAgent: navigator.userAgent,
+    }),
+  }).catch(() => undefined);
 }
 
 async function savePushSubscription(registration: ServiceWorkerRegistration) {

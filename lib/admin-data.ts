@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomBytes } from "crypto";
 import { cookies } from "next/headers";
-import { queryOne, queryRows, executeQuery, type DbRow } from "@/lib/db";
+import { queryOne, queryRows, executeQuery, withTransaction, type DbRow } from "@/lib/db";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
 import { notifyUser, notifyUsersByRole } from "@/lib/push-notifications";
 
@@ -18,6 +18,7 @@ export type AdminData = {
     totalReferrals: number;
     referralPoints: number;
   };
+  analytics: AdminAnalytics;
   members: AdminMember[];
   pendingKids: AdminKid[];
   events: AdminEvent[];
@@ -43,6 +44,24 @@ export type AdminMember = {
   code: string;
   active: boolean;
   kids: AdminKid[];
+};
+
+export type AdminAnalytics = {
+  appInstalls: number;
+  uniqueInstalledUsers: number;
+  installsToday: number;
+  installsLast7Days: number;
+  latestInstall: string;
+  recentInstalls: AdminInstall[];
+};
+
+export type AdminInstall = {
+  id: number;
+  parentName: string;
+  mobile: string;
+  source: string;
+  installedAt: string;
+  lastSeenAt: string;
 };
 
 export type AdminKid = {
@@ -96,6 +115,21 @@ export type AdminParticipant = {
   paid: boolean;
   checkIn: string;
   points: string;
+};
+
+export type AdminBookingVerification = {
+  id: number;
+  childName: string;
+  parentName: string;
+  phone: string;
+  eventTitle: string;
+  eventDate: string;
+  eventLocation: string;
+  paid: boolean;
+  checkedIn: boolean;
+  checkedInAt: string;
+  backupCode: string;
+  pointsPending: number;
 };
 
 export type AdminNotification = {
@@ -172,7 +206,7 @@ export async function getAdminData(): Promise<AdminData> {
   await requireAdmin();
   await ensureAdminProductSchemaOnce();
 
-  const [statsRows, users, memberKids, pendingKids, events, participants, notifications, heroSlides, brands, redemptions, topReferrers, recentReferrals] =
+  const [statsRows, analyticsRows, installRows, users, memberKids, pendingKids, events, participants, notifications, heroSlides, brands, redemptions, topReferrers, recentReferrals] =
     await Promise.all([
       queryRows<AnyRow>(`
         SELECT
@@ -186,6 +220,21 @@ export async function getAdminData(): Promise<AdminData> {
           (SELECT COUNT(*)::int FROM referral_rewards) AS total_referrals,
           (SELECT COALESCE(SUM(points_awarded), 0)::int FROM referral_rewards) AS referral_points
       `),
+      queryRows<AnyRow>(`
+        SELECT
+          (SELECT COUNT(*)::int FROM app_installs) AS app_installs,
+          (SELECT COUNT(DISTINCT user_id)::int FROM app_installs) AS unique_installed_users,
+          (SELECT COUNT(*)::int FROM app_installs WHERE installed_at >= CURRENT_DATE) AS installs_today,
+          (SELECT COUNT(*)::int FROM app_installs WHERE installed_at >= NOW() - INTERVAL '7 days') AS installs_last_7_days,
+          (SELECT MAX(installed_at) FROM app_installs) AS latest_install
+      `).catch(() => []),
+      queryRows<AnyRow>(`
+        SELECT ai.id, ai.source, ai.installed_at, ai.last_seen_at, u.parent_name, u.mobile
+        FROM app_installs ai
+        JOIN users u ON u.id = ai.user_id
+        ORDER BY ai.installed_at DESC
+        LIMIT 50
+      `).catch(() => []),
       queryRows<AnyRow>("SELECT * FROM users ORDER BY created_at DESC LIMIT 80"),
       queryRows<AnyRow>(`
         SELECT
@@ -256,6 +305,7 @@ export async function getAdminData(): Promise<AdminData> {
     ]);
 
   const statsRow = statsRows[0] ?? {};
+  const analyticsRow = analyticsRows[0] ?? {};
   const kidsByParent = groupKidsByParent(memberKids.map(mapAdminKid));
 
   return {
@@ -269,6 +319,21 @@ export async function getAdminData(): Promise<AdminData> {
       paidBookings: num(statsRow.paid_bookings),
       totalReferrals: num(statsRow.total_referrals),
       referralPoints: num(statsRow.referral_points),
+    },
+    analytics: {
+      appInstalls: num(analyticsRow.app_installs),
+      uniqueInstalledUsers: num(analyticsRow.unique_installed_users),
+      installsToday: num(analyticsRow.installs_today),
+      installsLast7Days: num(analyticsRow.installs_last_7_days),
+      latestInstall: analyticsRow.latest_install ? formatDate(analyticsRow.latest_install) : "No installs tracked yet",
+      recentInstalls: installRows.map((row) => ({
+        id: num(row.id),
+        parentName: str(row.parent_name) || "Parent",
+        mobile: formatPhone(str(row.mobile)),
+        source: str(row.source) || "install",
+        installedAt: formatDate(row.installed_at),
+        lastSeenAt: formatDate(row.last_seen_at),
+      })),
     },
     members: users.map((row) => mapMember(row, kidsByParent.get(num(row.id)) ?? [])),
     pendingKids: pendingKids.map(mapAdminKid),
@@ -613,6 +678,35 @@ export async function updateKidStatus(kidId: number, status: "approved" | "rejec
   });
 }
 
+export async function deleteAdminMember(parentId: number) {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  if (!parentId) throw new Error("Member not found.");
+
+  const member = await queryOne<AnyRow>(
+    "SELECT id, parent_name, mobile, role FROM users WHERE id = ? LIMIT 1",
+    [parentId],
+  );
+  if (!member) throw new Error("Member not found.");
+  if (str(member.role) === "admin") throw new Error("Admin account cannot be removed from memberships.");
+
+  await withTransaction(async (db) => {
+    await db.execute("DELETE FROM point_ledger WHERE user_id = ? OR kid_id IN (SELECT id FROM kids WHERE parent_id = ?)", [parentId, parentId]);
+    await db.execute("DELETE FROM users WHERE id = ?", [parentId]);
+  });
+
+  try {
+    await notifyUsersByRole("admin", {
+      title: "Member removed",
+      body: `${str(member.parent_name) || formatPhone(str(member.mobile)) || "A member"} was removed from memberships.`,
+      url: "/admin",
+      tag: `member-deleted-${parentId}`,
+    });
+  } catch (error) {
+    console.warn("Unable to notify admins about removed member:", error);
+  }
+}
+
 export async function getAdminKidFile(kidId: number, type: "photo" | "schoolId") {
   await requireAdmin();
   await ensureAdminProductSchemaOnce();
@@ -728,6 +822,19 @@ async function ensureAdminProductSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS app_installs (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      install_key VARCHAR(120) NOT NULL UNIQUE,
+      source VARCHAR(80),
+      user_agent TEXT,
+      installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_app_installs_user_id ON app_installs (user_id)");
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_app_installs_installed_at ON app_installs (installed_at)");
 }
 
 async function ensureAdminProductSchemaOnce() {
@@ -837,6 +944,32 @@ export async function checkInBooking(bookingId: number) {
     url: "/app?tab=Activities",
     tag: `booking-checkin-${bookingId}`,
   });
+}
+
+export async function getBookingForCheckIn(token: string): Promise<AdminBookingVerification> {
+  await requireAdmin();
+  await ensureAdminProductSchemaOnce();
+  const cleanToken = clean(token);
+  if (!cleanToken) throw new Error("Ticket QR token is required.");
+
+  const booking = await queryOne<AnyRow>(
+    `SELECT b.*, k.child_name, u.parent_name, u.mobile, e.title AS event_title, e.event_date, e.location AS event_location
+     FROM bookings b
+     JOIN kids k ON k.id = b.kid_id
+     JOIN users u ON u.id = b.user_id
+     LEFT JOIN events e ON e.id = b.event_id
+     WHERE b.qr_token = ?
+     LIMIT 1`,
+    [cleanToken],
+  );
+
+  if (!booking) throw new Error("Ticket not found.");
+  return mapBookingVerification(booking);
+}
+
+export async function checkInBookingByToken(token: string) {
+  const booking = await getBookingForCheckIn(token);
+  await checkInBooking(booking.id);
 }
 
 async function generateKidCode(kidId: number) {
@@ -960,6 +1093,24 @@ function mapNotification(row: AnyRow): AdminNotification {
     message: str(row.message),
     type: str(row.type),
     createdAt: formatDate(row.created_at),
+  };
+}
+
+function mapBookingVerification(row: AnyRow): AdminBookingVerification {
+  const checkedIn = Boolean(row.checked_in_at);
+  return {
+    id: num(row.id),
+    childName: str(row.child_name) || "Child",
+    parentName: str(row.parent_name) || "Parent",
+    phone: formatPhone(str(row.mobile)),
+    eventTitle: str(row.event_title) || "Activity",
+    eventDate: formatDate(row.event_date),
+    eventLocation: str(row.event_location) || "Venue TBA",
+    paid: str(row.payment_status) === "success",
+    checkedIn,
+    checkedInAt: checkedIn ? formatDate(row.checked_in_at) : "",
+    backupCode: str(row.backup_code),
+    pointsPending: Math.max(0, num(row.points_total) - num(row.points_awarded_on_payment) - num(row.points_awarded_on_attendance)),
   };
 }
 
