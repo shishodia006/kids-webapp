@@ -56,7 +56,7 @@ CREATE TABLE "kids" (
     "block_rank" VARCHAR(80) NOT NULL DEFAULT 'Newbie',
     "status" "KidStatus" NOT NULL DEFAULT 'pending',
     "konnekt_kode" VARCHAR(60),
-    "konnekt_points" INTEGER NOT NULL DEFAULT 100,
+    "konnekt_points" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -72,7 +72,7 @@ CREATE TABLE "events" (
     "event_date" TIMESTAMPTZ(6),
     "location" VARCHAR(190),
     "price" DECIMAL(10,2) NOT NULL DEFAULT 0.00,
-    "image" VARCHAR(255),
+    "image" TEXT,
     "capacity" INTEGER,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,

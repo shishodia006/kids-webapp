@@ -270,24 +270,33 @@ export async function addChildProfile(input: Record<string, unknown>) {
   );
   const kidId = Number(inserted?.id);
   if (kidId) {
-    await executeQuery("UPDATE kids SET school_id_card_data = ?, photo_data = ?, gender = ? WHERE id = ?", [schoolIdCardData || null, photoData || null, gender, kidId]);
+    await runBestEffort("child profile supplemental fields", async () => {
+      await executeQuery("UPDATE kids SET school_id_card_data = ?, photo_data = ?, gender = ? WHERE id = ?", [schoolIdCardData || null, photoData || null, gender, kidId]);
+    });
   }
 
-  await sendWhatsAppText(
-    user.mobile,
-    `${childName}'s profile is currently under verification. You'll be notified once it's approved. Meanwhile, explore upcoming events for your child!`,
-  );
-  await notifyUser(user.id, {
-    title: "Child profile submitted",
-    body: `${childName}'s profile is pending admin review.`,
-    url: "/app?tab=Account",
-    tag: `kid-submitted-${kidId || childName}`,
-  });
-  await notifyAdmins({
-    title: "New child profile pending",
-    body: `${childName} was added by ${user.parentName || "a parent"}.`,
-    url: "/admin",
-    tag: `admin-kid-pending-${kidId || Date.now()}`,
+  await runBestEffort("child profile notifications", async () => {
+    const notificationResults = await Promise.allSettled([
+      sendWhatsAppText(
+        user.mobile,
+        `${childName}'s profile is currently under verification. You'll be notified once it's approved. Meanwhile, explore upcoming events for your child!`,
+      ),
+      notifyUser(user.id, {
+        title: "Child profile submitted",
+        body: `${childName}'s profile is pending admin review.`,
+        url: "/app?tab=Account",
+        tag: `kid-submitted-${kidId || childName}`,
+      }),
+      notifyAdmins({
+        title: "New child profile pending",
+        body: `${childName} was added by ${user.parentName || "a parent"}.`,
+        url: "/admin",
+        tag: `admin-kid-pending-${kidId || Date.now()}`,
+      }),
+    ]);
+    notificationResults.forEach((result) => {
+      if (result.status === "rejected") console.warn("child profile notification failed:", result.reason);
+    });
   });
 
   return { message: `${childName}'s profile is currently under verification.` };
@@ -563,9 +572,10 @@ export async function confirmBooking({ eventId, kidIds, amount, razorpayPaymentI
         [user.id, kidId, eventId, razorpayPaymentId, perKidAmount, qr, backupCode, pointsTotal, pointsOnPurchase, 0],
       );
       await connection.execute("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [pointsOnPurchase, user.id]);
+      await connection.execute("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [pointsOnPurchase, kidId]);
       await connection.execute(
         "INSERT INTO point_ledger (user_id, kid_id, source, points, description, ref_type, ref_id) VALUES (?, ?, 'event_payment', ?, ?, 'event', ?)",
-        [user.id, kidId, pointsOnPurchase, `${pointsOnPurchase} points credited for ${mappedEvent.title}`, eventId],
+        [user.id, kidId, pointsOnPurchase, `${pointsOnPurchase} registration points credited for ${mappedEvent.title}. Remaining ${pointsOnAttendance} points unlock at check-in.`, eventId],
       );
     }
   });
@@ -791,12 +801,14 @@ async function ensureProductSchema() {
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS photo_data TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS school_id_card_data TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
+  await executeQuery("ALTER TABLE kids ALTER COLUMN konnekt_points SET DEFAULT 0");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS min_age INTEGER");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS max_age INTEGER");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS restricted_area VARCHAR(190)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS points_earnable INTEGER NOT NULL DEFAULT 100");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS image TEXT");
+  await executeQuery("ALTER TABLE events ALTER COLUMN image TYPE TEXT");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true");
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS backup_code VARCHAR(40)");
   await executeQuery("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS points_total INTEGER NOT NULL DEFAULT 100");
@@ -885,4 +897,12 @@ async function ensureProductSchemaOnce() {
     throw error;
   });
   await productSchemaReady;
+}
+
+async function runBestEffort(label: string, task: () => Promise<void>) {
+  try {
+    await task();
+  } catch (error) {
+    console.warn(`${label} failed:`, error);
+  }
 }

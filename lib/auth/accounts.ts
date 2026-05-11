@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
-import { executeQuery, queryOne, queryRows, type DbRow } from "@/lib/db";
+import { executeQuery, queryOne, type DbRow } from "@/lib/db";
 import type { AuthRole } from "@/lib/auth/session";
 
 export type RegisterDetails = {
@@ -163,7 +163,7 @@ export async function createRegisteredFamily(details: RegisterDetails) {
     INSERT INTO users
       (email, mobile, password, parent_name, child_name, age, block_sector, konnekt_kode, role)
     VALUES
-      (?, ?, ?, ?, ?, ?, '', ?, 'user')
+      (?, ?, ?, ?, ?, ?, ?, ?, 'user')
     RETURNING id
     `,
     [
@@ -173,6 +173,7 @@ export async function createRegisteredFamily(details: RegisterDetails) {
       parentName,
       details.childName,
       childAge,
+      referrer?.referralCode || "",
       kode,
     ]
   );
@@ -221,7 +222,7 @@ export async function createRegisteredFamily(details: RegisterDetails) {
         INSERT INTO kids
           (parent_id, child_name, age, school, block_rank, status, konnekt_points)
         VALUES
-          (?, ?, ?, ?, 'Newbie', 'pending', 100)
+          (?, ?, ?, ?, 'Newbie', 'pending', 0)
         `,
         [parentId, details.childName, childAge, details.school]
       );
@@ -236,14 +237,6 @@ export async function createRegisteredFamily(details: RegisterDetails) {
         [parentId, details.childName, childAge]
       );
     }
-  }
-
-  if (referrer?.parentId) {
-    await awardReferralBonus(
-      referrer.parentId,
-      parentId,
-      referrer.referralCode
-    );
   }
 
   return parentId;
@@ -284,48 +277,6 @@ async function findReferrerByCode(code: string) {
   if (kid) return { parentId: Number(kid.parent_id), referralCode: stringValue(kid.referral_code) };
 
   return null;
-}
-
-async function awardReferralBonus(referrerParentId: number, referredParentId: number, referralCode: string) {
-  if (!referrerParentId || referrerParentId === referredParentId) return;
-
-  const kids = await queryRows<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC", [referrerParentId]);
-  if (!kids.length) return;
-
-  const points = 50;
-  await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referrerParentId]);
-  const baseShare = Math.floor(points / kids.length);
-  const remainder = points % kids.length;
-
-  for (const [index, kid] of kids.entries()) {
-    const share = baseShare + (index < remainder ? 1 : 0);
-    if (share > 0) {
-      await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [share, Number(kid.id)]);
-    }
-  }
-
-  const referredKid = await queryOne<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC LIMIT 1", [referredParentId]);
-  if (referredKid?.id) {
-    await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referredParentId]);
-    await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [points, Number(referredKid.id)]);
-    try {
-      await executeQuery(
-        "INSERT INTO point_ledger (user_id, kid_id, source, points, description, ref_type, ref_id) VALUES (?, ?, 'referral_welcome_bonus', ?, ?, 'referral', ?)",
-        [referredParentId, Number(referredKid.id), points, "Welcome bonus for joining Konnectly through a referral.", referrerParentId],
-      );
-    } catch {
-      // Older DBs may not have point_ledger yet. The point balances are the important side effect.
-    }
-  }
-
-  try {
-    await executeQuery(
-      "INSERT INTO referral_rewards (referrer_parent_id, referred_parent_id, referral_code, points_awarded) VALUES (?, ?, ?, ?)",
-      [referrerParentId, referredParentId, referralCode, points],
-    );
-  } catch {
-    // Older DBs may not have referral_rewards yet. Points are the important side effect.
-  }
 }
 
 function stringValue(value: unknown) {

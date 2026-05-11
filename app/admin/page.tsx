@@ -38,9 +38,12 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 const ADMIN_FONT_STYLE = { fontFamily: "'Nunito', sans-serif" };
+const ADMIN_IMAGE_MAX_SIZE_MB = 8;
+const ADMIN_IMAGE_MAX_SIDE = 1200;
+const ADMIN_IMAGE_QUALITY = 0.76;
 
 type Section = "Memberships" | "Activities" | "Promotions & Updates" | "Business" | "Referral Dashboard" | "Analytics";
 type Modal = "brand" | "notification" | "referral-settings" | null;
@@ -120,7 +123,7 @@ export default function AdminPage() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  async function runAction(message: string, action: () => Promise<void>) {
+  async function runAction(message: string, action: () => Promise<void>, options: { rethrow?: boolean } = {}) {
     setBusy(true);
     setStatus(message);
     try {
@@ -129,6 +132,7 @@ export default function AdminPage() {
       setStatus("");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Request failed.");
+      if (options.rethrow) throw error;
     } finally {
       setBusy(false);
     }
@@ -230,8 +234,8 @@ export default function AdminPage() {
             {data && activeSection === "Activities" && (
               <Activities
                 data={data}
-                onCreateEvent={(body) => runAction("Saving activity...", () => postJson("/api/admin/events", body))}
-                onUpdateEvent={(eventId, body) => runAction("Updating activity...", () => requestJson("/api/admin/events", { method: "PATCH", body: { ...body, eventId } }))}
+                onCreateEvent={(body) => runAction("Saving activity...", () => postJson("/api/admin/events", body), { rethrow: true })}
+                onUpdateEvent={(eventId, body) => runAction("Updating activity...", () => requestJson("/api/admin/events", { method: "PATCH", body: { ...body, eventId } }), { rethrow: true })}
                 onDeleteEvent={(eventId) => runAction("Deleting activity...", () => requestJson("/api/admin/events", { method: "DELETE", body: { eventId } }))}
                 onCheckIn={(bookingId) => runAction("Checking in participant and awarding points...", () => postJson("/api/admin/bookings/check-in", { bookingId }))}
               />
@@ -830,27 +834,48 @@ function Activities({
   onCheckIn,
 }: {
   data: AdminData;
-  onCreateEvent: (body: Record<string, unknown>) => void;
-  onUpdateEvent: (eventId: number, body: Record<string, unknown>) => void;
+  onCreateEvent: (body: Record<string, unknown>) => Promise<void>;
+  onUpdateEvent: (eventId: number, body: Record<string, unknown>) => Promise<void>;
   onDeleteEvent: (eventId: number) => void;
   onCheckIn: (bookingId: number) => void;
 }) {
   const [activityTab, setActivityTab] = useState(0);
   const [editingEvent, setEditingEvent] = useState<AdminEvent | null>(null);
+  const [formStatus, setFormStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [formMessage, setFormMessage] = useState("");
+  const submitInFlightRef = useRef(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitInFlightRef.current) return;
+    submitInFlightRef.current = true;
     const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    const body = Object.fromEntries(form) as Record<string, unknown>;
-    body.image = await fileToDataUrl(form.get("image"));
-    if (editingEvent) {
-      onUpdateEvent(editingEvent.id, body);
-      setEditingEvent(null);
-    } else {
-      onCreateEvent(body);
+    setFormStatus("saving");
+    setFormMessage(editingEvent ? "Updating activity..." : "Submitting activity...");
+
+    try {
+      const form = new FormData(formElement);
+      const body = Object.fromEntries(form) as Record<string, unknown>;
+      body.image = await fileToDataUrl(form.get("image"));
+      if (editingEvent) {
+        await onUpdateEvent(editingEvent.id, body);
+        setEditingEvent(null);
+      } else {
+        await onCreateEvent(body);
+      }
+      formElement.reset();
+      setFormStatus("saved");
+      setFormMessage(editingEvent ? "Activity updated. Families will see the latest details." : "Activity saved. You can add another activity now.");
+      window.setTimeout(() => {
+        setFormStatus("idle");
+        setFormMessage("");
+      }, 3500);
+    } catch (error) {
+      setFormStatus("error");
+      setFormMessage(error instanceof Error ? error.message : "Unable to save activity.");
+    } finally {
+      submitInFlightRef.current = false;
     }
-    formElement.reset();
   }
 
   function deleteEvent(event: AdminEvent) {
@@ -869,7 +894,7 @@ function Activities({
               <h2 className="text-lg font-black sm:text-xl">{editingEvent ? "Edit Activity" : "Create New Activity"}</h2>
               {editingEvent && <SmallButton label="Cancel Edit" onClick={() => setEditingEvent(null)} />}
             </div>
-            <ActivityForm key={editingEvent?.id ?? "new"} event={editingEvent} onSubmit={submit} />
+            <ActivityForm key={editingEvent?.id ?? "new"} event={editingEvent} onSubmit={submit} status={formStatus} message={formMessage} />
           </Panel>
           <EventList events={data.events} participants={data.liveParticipants} onEdit={setEditingEvent} onDelete={deleteEvent} />
         </div>
@@ -880,7 +905,21 @@ function Activities({
   );
 }
 
-function ActivityForm({ event, onSubmit }: { event: AdminEvent | null; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+function ActivityForm({
+  event,
+  onSubmit,
+  status,
+  message,
+}: {
+  event: AdminEvent | null;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  status: "idle" | "saving" | "saved" | "error";
+  message: string;
+}) {
+  const saving = status === "saving";
+  const saved = status === "saved";
+  const buttonLabel = saving ? (event ? "Updating Activity..." : "Saving Activity...") : saved ? "Activity Saved" : event ? "Update Activity" : "Save Activity";
+
   return (
     <form onSubmit={onSubmit} className="mt-5 grid gap-4 lg:grid-cols-2">
       <Field name="title" label="Activity Name *" placeholder="Summer Art Camp 2026" required defaultValue={event?.title ?? ""} />
@@ -907,7 +946,13 @@ function ActivityForm({ event, onSubmit }: { event: AdminEvent | null; onSubmit:
         <textarea name="description" defaultValue={event?.description ?? ""} className="min-h-24 rounded-2xl border-2 border-[#ddd6fb] bg-[#f8f7ff] px-4 py-3 text-sm font-bold outline-none transition focus:border-[#604bd1]" />
       </label>
       <div className="lg:col-span-2">
-        <PillButton label={event ? "Update Activity" : "Save Activity"} submit />
+        {message && (
+          <div className={`mb-3 flex items-center gap-2 rounded-2xl px-4 py-3 text-xs font-black ${status === "error" ? "bg-red-50 text-red-600 ring-1 ring-red-100" : "bg-[#f3f0ff] text-[#5b45d1] ring-1 ring-[#ddd6fb]"}`}>
+            {saving ? <Loader2 className="animate-spin" size={17} /> : saved ? <Check size={17} /> : <X size={17} />}
+            {message}
+          </div>
+        )}
+        <PillButton icon={saving ? <Loader2 className="animate-spin" size={17} /> : saved ? <Check size={17} /> : <CirclePlus size={17} />} label={buttonLabel} submit disabled={saving} success={saved} />
       </div>
     </form>
   );
@@ -1885,9 +1930,31 @@ function SelectField({ label, name, options, defaultValue }: { label: string; na
   );
 }
 
-function PillButton({ icon, label, muted, onClick, submit }: { icon?: ReactNode; label: string; muted?: boolean; onClick?: () => void; submit?: boolean }) {
+function PillButton({
+  icon,
+  label,
+  muted,
+  onClick,
+  submit,
+  disabled,
+  success,
+}: {
+  icon?: ReactNode;
+  label: string;
+  muted?: boolean;
+  onClick?: () => void;
+  submit?: boolean;
+  disabled?: boolean;
+  success?: boolean;
+}) {
+  const tone = success
+    ? "bg-green-600 text-xs text-white shadow-xl shadow-green-600/20 hover:bg-green-600"
+    : muted
+      ? "border border-[#e7e1fb] bg-white text-xs text-[#5b45d1] hover:bg-[#f6f3ff]"
+      : "bg-[#604bd1] text-xs text-white shadow-xl shadow-[#604bd1]/25 hover:bg-[#503bc1]";
+
   return (
-    <button onClick={onClick} className={`flex w-fit items-center justify-center gap-2 rounded-full px-6 py-3 font-black transition ${muted ? "border border-[#e7e1fb] bg-white text-xs text-[#5b45d1] hover:bg-[#f6f3ff]" : "bg-[#604bd1] text-xs text-white shadow-xl shadow-[#604bd1]/25 hover:bg-[#503bc1]"}`} type={submit ? "submit" : "button"}>
+    <button onClick={onClick} disabled={disabled} className={`flex w-fit items-center justify-center gap-2 rounded-full px-6 py-3 font-black transition disabled:cursor-wait disabled:opacity-75 ${tone}`} type={submit ? "submit" : "button"}>
       {icon} {label}
     </button>
   );
@@ -1978,8 +2045,7 @@ async function requestJson(url: string, options: { method: "POST" | "PATCH" | "D
   const response = await fetch(url, { method: options.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(options.body) });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) {
-    window.location.href = "/admin-login?next=/admin";
-    throw new Error("Admin session expired. Please login again.");
+    throw new Error("Admin session expire ho gaya hai. Please login karke dobara try kijiye.");
   }
   if (!response.ok) throw new Error(data.message || "Request failed.");
   return data;
@@ -1988,12 +2054,50 @@ async function requestJson(url: string, options: { method: "POST" | "PATCH" | "D
 async function fileToDataUrl(value: FormDataEntryValue | null) {
   if (!(value instanceof File) || value.size === 0) return "";
   if (!value.type.startsWith("image/")) throw new Error("Please upload only image files.");
-  if (value.size > 1_500_000) throw new Error("Images must be smaller than 1.5 MB.");
+  if (value.size > ADMIN_IMAGE_MAX_SIZE_MB * 1024 * 1024) throw new Error(`Images must be smaller than ${ADMIN_IMAGE_MAX_SIZE_MB} MB.`);
 
+  try {
+    return await compressAdminImage(value);
+  } catch {
+    return readFileAsDataUrl(value);
+  }
+}
+
+function readFileAsDataUrl(value: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
     reader.onerror = () => reject(new Error("Unable to read selected image."));
     reader.readAsDataURL(value);
+  });
+}
+
+async function compressAdminImage(file: File) {
+  const image = await loadAdminImage(file);
+  const scale = Math.min(1, ADMIN_IMAGE_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to prepare selected image.");
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", ADMIN_IMAGE_QUALITY);
+}
+
+function loadAdminImage(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unable to read selected image."));
+    };
+    image.src = url;
   });
 }

@@ -85,7 +85,7 @@ model Kid {
   block_rank     String       @default("Newbie") @db.VarChar(80)
   status         KidStatus    @default(pending)
   konnekt_kode   String?      @unique @db.VarChar(60)
-  konnekt_points Int          @default(100)
+  konnekt_points Int          @default(0)
   created_at     DateTime     @default(now()) @db.Timestamptz(6)
   updated_at     DateTime     @default(now()) @updatedAt @db.Timestamptz(6)
   parent         User         @relation(fields: [parent_id], references: [id], onDelete: Cascade)
@@ -105,7 +105,7 @@ model Event {
   event_date  DateTime? @db.Timestamptz(6)
   location    String?   @db.VarChar(190)
   price       Decimal   @default(0.00) @db.Decimal(10, 2)
-  image       String?   @db.VarChar(255)
+  image       String?
   capacity    Int?
   min_age     Int?
   max_age     Int?

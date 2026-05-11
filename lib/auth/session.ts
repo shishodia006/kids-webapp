@@ -1,6 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "crypto";
 
 export const SESSION_COOKIE_NAME = process.env.NODE_ENV === "production" ? "__Host-konnectly_session" : "konnectly_session";
+export const ADMIN_SESSION_COOKIE_NAME = process.env.NODE_ENV === "production" ? "__Host-konnectly_admin_session" : "konnectly_admin_session";
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 export type AuthRole = "user" | "admin" | "brand";

@@ -108,6 +108,64 @@
             opacity: 1;
         }
 
+        .nav-toggle {
+            display: none;
+            width: 44px;
+            height: 44px;
+            flex-shrink: 0;
+            place-items: center;
+            border: 1px solid rgba(26, 26, 26, 0.12);
+            border-radius: 12px;
+            background: white;
+            color: var(--dark);
+            cursor: pointer;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        }
+
+        .nav-toggle span {
+            position: relative;
+            display: block;
+            width: 20px;
+            height: 2px;
+            border-radius: 99px;
+            background: var(--dark);
+            transition: background 0.2s;
+        }
+
+        .nav-toggle span::before,
+        .nav-toggle span::after {
+            content: '';
+            position: absolute;
+            left: 0;
+            width: 20px;
+            height: 2px;
+            border-radius: 99px;
+            background: var(--dark);
+            transition: transform 0.2s, top 0.2s;
+        }
+
+        .nav-toggle span::before {
+            top: -7px;
+        }
+
+        .nav-toggle span::after {
+            top: 7px;
+        }
+
+        nav.menu-open .nav-toggle span {
+            background: transparent;
+        }
+
+        nav.menu-open .nav-toggle span::before {
+            top: 0;
+            transform: rotate(45deg);
+        }
+
+        nav.menu-open .nav-toggle span::after {
+            top: 0;
+            transform: rotate(-45deg);
+        }
+
         .nav-cta {
             background: var(--yellow);
             color: var(--dark) !important;
@@ -1211,10 +1269,53 @@
         @media (max-width: 900px) {
             nav {
                 padding: 14px 20px;
+                z-index: 1000;
+            }
+
+            .nav-toggle {
+                display: grid;
             }
 
             .nav-links {
-                display: none;
+                position: absolute;
+                top: calc(100% + 10px);
+                left: 16px;
+                right: 16px;
+                display: flex;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 4px;
+                padding: 12px;
+                border: 1px solid rgba(245, 200, 66, 0.34);
+                border-radius: 20px;
+                background: rgba(255, 255, 255, 0.98);
+                box-shadow: 0 24px 60px rgba(0, 0, 0, 0.16);
+                opacity: 0;
+                pointer-events: none;
+                transform: translateY(-10px);
+                transition: opacity 0.2s, transform 0.2s;
+            }
+
+            nav.menu-open .nav-links {
+                opacity: 1;
+                pointer-events: auto;
+                transform: translateY(0);
+            }
+
+            .nav-links a {
+                display: block;
+                border-radius: 14px;
+                padding: 13px 14px;
+                font-size: 15px;
+                opacity: 0.9;
+            }
+
+            .nav-links a:hover {
+                background: var(--warm-white);
+            }
+
+            .nav-cta {
+                text-align: center;
             }
 
             .what-in,
@@ -1308,7 +1409,10 @@
         <a href="#" class="nav-logo">
             <img src="/images/logo.png" alt="Konnectly Logo" style="width: 150px;">
         </a>
-        <ul class="nav-links">
+        <button class="nav-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="primaryNav">
+            <span></span>
+        </button>
+        <ul class="nav-links" id="primaryNav">
             <li><a href="#what">About</a></li>
             <li><a href="#framework">The 3Es</a></li>
             <li><a href="#why">Why Us</a></li>
@@ -1636,7 +1740,28 @@
     </footer>
 
     <script>
-        window.addEventListener('scroll', () => document.getElementById('nb').classList.toggle('scrolled', scrollY > 20));
+        const navbar = document.getElementById('nb');
+        const navToggle = document.querySelector('.nav-toggle');
+        const navLinks = document.querySelectorAll('.nav-links a');
+
+        window.addEventListener('scroll', () => navbar.classList.toggle('scrolled', scrollY > 20));
+        navToggle.addEventListener('click', () => {
+            const isOpen = navbar.classList.toggle('menu-open');
+            navToggle.setAttribute('aria-expanded', String(isOpen));
+            navToggle.setAttribute('aria-label', isOpen ? 'Close menu' : 'Open menu');
+        });
+        navLinks.forEach(link => link.addEventListener('click', () => {
+            navbar.classList.remove('menu-open');
+            navToggle.setAttribute('aria-expanded', 'false');
+            navToggle.setAttribute('aria-label', 'Open menu');
+        }));
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 900) {
+                navbar.classList.remove('menu-open');
+                navToggle.setAttribute('aria-expanded', 'false');
+                navToggle.setAttribute('aria-label', 'Open menu');
+            }
+        });
 
         const stats = document.querySelectorAll('.stat');
         new IntersectionObserver((entries) => entries.forEach((e, i) => { if (e.isIntersecting) setTimeout(() => e.target.classList.add('vis'), i * 120); }), { threshold: 0.3 }).observe = function (el) { stats.forEach((s, i) => IntersectionObserver.prototype.observe.call(this, s)); return; };

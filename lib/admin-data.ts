@@ -3,7 +3,7 @@ import "server-only";
 import { randomBytes } from "crypto";
 import { cookies } from "next/headers";
 import { queryOne, queryRows, executeQuery, withTransaction, type DbRow } from "@/lib/db";
-import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
+import { ADMIN_SESSION_COOKIE_NAME, SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
 import { notifyUser, notifyUsersByRole } from "@/lib/push-notifications";
 
 export type AdminData = {
@@ -197,7 +197,9 @@ let adminProductSchemaReady: Promise<void> | null = null;
 
 export async function requireAdmin() {
   const cookieStore = await cookies();
-  const session = verifySessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  const session =
+    verifySessionToken(cookieStore.get(ADMIN_SESSION_COOKIE_NAME)?.value) ??
+    verifySessionToken(cookieStore.get(SESSION_COOKIE_NAME)?.value);
   if (!session || session.role !== "admin") throw new Error("Unauthorized");
   return session;
 }
@@ -384,11 +386,13 @@ export async function createAdminEvent(input: Record<string, unknown>) {
     ],
   );
 
-  await notifyUsersByRole("user", {
-    title: "New activity added",
-    body: `${event.title} is now live in Konnectly.`,
-    url: "/app?tab=Activities",
-    tag: `event-created-${Date.now()}`,
+  await runBestEffort("activity create notification", async () => {
+    await notifyUsersByRole("user", {
+      title: "New activity added",
+      body: `${event.title} is now live in Konnectly.`,
+      url: "/app?tab=Activities",
+      tag: `event-created-${Date.now()}`,
+    });
   });
 }
 
@@ -420,11 +424,13 @@ export async function updateAdminEvent(eventId: number, input: Record<string, un
     ],
   );
 
-  await notifyUsersByRole("user", {
-    title: "Activity updated",
-    body: `${event.title} details were updated.`,
-    url: "/app?tab=Activities",
-    tag: `event-updated-${eventId}`,
+  await runBestEffort("activity update notification", async () => {
+    await notifyUsersByRole("user", {
+      title: "Activity updated",
+      body: `${event.title} details were updated.`,
+      url: "/app?tab=Activities",
+      tag: `event-updated-${eventId}`,
+    });
   });
 }
 
@@ -730,7 +736,7 @@ export async function getAdminKidFile(kidId: number, type: "photo" | "schoolId")
 
 async function awardReferralOnApproval(kidId: number) {
   const approvedKid = await queryOne<AnyRow>(
-    `SELECT k.parent_id, u.parent_name, u.block_sector AS referral_code
+    `SELECT k.parent_id, k.child_name, u.parent_name, u.mobile, u.block_sector AS referral_code
      FROM kids k
      JOIN users u ON u.id = k.parent_id
      WHERE k.id = ?
@@ -751,18 +757,25 @@ async function awardReferralOnApproval(kidId: number) {
   if (!referrer || referrer.parentId === referredParentId) return;
 
   const points = 50;
-  await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referrer.parentId]);
-  await executeQuery(
-    "INSERT INTO point_ledger (user_id, source, points, description, ref_type, ref_id) VALUES (?, 'successful_referral', ?, ?, 'referral', ?)",
-    [referrer.parentId, points, `${str(approvedKid?.parent_name) || "A parent"} joined Konnectly using your referral.`, referredParentId],
-  );
+  const referrerUser = await queryOne<AnyRow>("SELECT parent_name, mobile FROM users WHERE id = ? LIMIT 1", [referrer.parentId]);
+  const referrerKids = await queryRows<AnyRow>("SELECT id, child_name FROM kids WHERE parent_id = ? ORDER BY id ASC", [referrer.parentId]);
+  const shares = splitPoints(points, referrerKids.length);
 
-  const referrerKids = await queryRows<AnyRow>("SELECT id FROM kids WHERE parent_id = ? ORDER BY id ASC", [referrer.parentId]);
-  const baseShare = referrerKids.length ? Math.floor(points / referrerKids.length) : 0;
-  const remainder = referrerKids.length ? points % referrerKids.length : 0;
+  await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referrer.parentId]);
   for (const [index, kid] of referrerKids.entries()) {
-    const share = baseShare + (index < remainder ? 1 : 0);
-    if (share > 0) await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [share, num(kid.id)]);
+    const share = shares[index] ?? 0;
+    if (share <= 0) continue;
+    await executeQuery("UPDATE kids SET konnekt_points = konnekt_points + ? WHERE id = ?", [share, num(kid.id)]);
+    await executeQuery(
+      "INSERT INTO point_ledger (user_id, kid_id, source, points, description, ref_type, ref_id) VALUES (?, ?, 'successful_referral', ?, ?, 'referral', ?)",
+      [
+        referrer.parentId,
+        num(kid.id),
+        share,
+        `${points} referral points received and divided across ${referrerKids.length} kid profile${referrerKids.length === 1 ? "" : "s"}. ${str(approvedKid?.parent_name) || "A parent"} joined using your referral.`,
+        referredParentId,
+      ],
+    );
   }
 
   await executeQuery("UPDATE users SET konnect_points = konnect_points + ? WHERE id = ?", [points, referredParentId]);
@@ -776,6 +789,50 @@ async function awardReferralOnApproval(kidId: number) {
     "INSERT INTO referral_rewards (referrer_parent_id, referred_parent_id, referral_code, points_awarded) VALUES (?, ?, ?, ?)",
     [referrer.parentId, referredParentId, referralCode, points],
   );
+
+  const splitMessage = formatReferralSplitMessage(points, referrerKids.map((kid, index) => ({ name: str(kid.child_name) || `Kid ${index + 1}`, points: shares[index] ?? 0 })));
+  await runBestEffort("referral point notifications", async () => {
+    await Promise.allSettled([
+      notifyUser(referrer.parentId, {
+        title: "Referral points received",
+        body: `You received ${points} Konnect Points for your referral. ${splitMessage}`,
+        url: "/app?tab=Account",
+        tag: `referral-earned-${referredParentId}`,
+      }),
+      notifyUser(referredParentId, {
+        title: "Welcome points added",
+        body: `${points} Konnect Points were added to ${str(approvedKid?.child_name) || "your first verified kid"} after profile verification.`,
+        url: "/app?tab=Account",
+        tag: `referral-welcome-${kidId}`,
+      }),
+    ]);
+
+    const { sendWhatsAppText } = await import("@/lib/auth/otp");
+    await Promise.allSettled([
+      str(referrerUser?.mobile)
+        ? sendWhatsAppText(str(referrerUser?.mobile), `You received ${points} Konnect Points for your referral. ${splitMessage}`)
+        : Promise.resolve(),
+      str(approvedKid?.mobile)
+        ? sendWhatsAppText(str(approvedKid?.mobile), `${points} welcome Konnect Points have been added to ${str(approvedKid?.child_name) || "your first verified kid"} after profile verification.`)
+        : Promise.resolve(),
+    ]);
+  });
+}
+
+function splitPoints(points: number, count: number) {
+  if (count <= 0) return [];
+  const base = Math.floor(points / count);
+  const remainder = points % count;
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+
+function formatReferralSplitMessage(shares: Array<{ name: string; points: number }>): string;
+function formatReferralSplitMessage(points: number, shares: Array<{ name: string; points: number }>): string;
+function formatReferralSplitMessage(pointsOrShares: number | Array<{ name: string; points: number }>, maybeShares?: Array<{ name: string; points: number }>) {
+  const shares = Array.isArray(pointsOrShares) ? pointsOrShares : maybeShares ?? [];
+  if (!shares.length) return "Points are added to your family balance.";
+  if (shares.length === 1) return `${shares[0].points} points added to ${shares[0].name}.`;
+  return `They were divided between your ${shares.length} kid profiles: ${shares.map((share) => `${share.name} +${share.points}`).join(", ")}.`;
 }
 
 async function ensureAdminProductSchema() {
@@ -784,12 +841,14 @@ async function ensureAdminProductSchema() {
   await executeQuery("ALTER TABLE brands ADD COLUMN IF NOT EXISTS image TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS photo_data TEXT");
   await executeQuery("ALTER TABLE kids ADD COLUMN IF NOT EXISTS school_id_card_data TEXT");
+  await executeQuery("ALTER TABLE kids ALTER COLUMN konnekt_points SET DEFAULT 0");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS min_age INTEGER");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS max_age INTEGER");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS gender VARCHAR(20)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS restricted_area VARCHAR(190)");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS points_earnable INTEGER NOT NULL DEFAULT 100");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS image TEXT");
+  await executeQuery("ALTER TABLE events ALTER COLUMN image TYPE TEXT");
   await executeQuery("ALTER TABLE events ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT true");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS qr_code VARCHAR(255)");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
@@ -843,6 +902,14 @@ async function ensureAdminProductSchemaOnce() {
     throw error;
   });
   await adminProductSchemaReady;
+}
+
+async function runBestEffort(label: string, task: () => Promise<void>) {
+  try {
+    await task();
+  } catch (error) {
+    console.warn(`${label} failed:`, error);
+  }
 }
 
 async function findReferrerByCode(code: string) {
@@ -929,7 +996,7 @@ export async function checkInBooking(bookingId: number) {
         num(booking.user_id),
         num(booking.kid_id),
         attendancePoints,
-        `${attendancePoints} points credited for attending ${str(booking.event_title) || "an event"}`,
+        `${attendancePoints} check-in points credited for attending ${str(booking.event_title) || "an event"}`,
         bookingId,
       ],
     );

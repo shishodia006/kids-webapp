@@ -54,6 +54,10 @@ const navItems: Array<{ label: NavLabel; icon: string }> = [
 
 const APP_DATA_CACHE_KEY = "konnectly_app_data_v1";
 const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app already installed hai. Home screen se open kijiye ya browser ke Open in app button par tap kijiye.";
+const MAX_PROFILE_IMAGE_SIZE_MB = 8;
+const MAX_PROFILE_DOCUMENT_SIZE_MB = 2;
+const PROFILE_IMAGE_MAX_SIDE = 1200;
+const PROFILE_IMAGE_QUALITY = 0.78;
 
 export default function UserApp() {
   const navInitializedRef = useRef(false);
@@ -1113,16 +1117,19 @@ function InlineAddKidForm({ onCancel, onSaved }: { onCancel: () => void; onSaved
     else if (status === "Child age cannot be more than 18 years.") setStatus("");
   }
 
-  function uploadFile(file: File | undefined, type: "photo" | "schoolId") {
+  async function uploadFile(file: File | undefined, type: "photo" | "schoolId") {
     setStatus("");
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus("File size should be 5MB or less.");
+    if (!isSupportedProfileFile(file, type)) {
+      setStatus(type === "photo" ? "Please upload a JPG or PNG child photo." : "Please upload school ID as PDF, JPG, or PNG.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = typeof reader.result === "string" ? reader.result : "";
+    if (file.size > getProfileFileSizeLimitBytes(file, type)) {
+      setStatus(`File size should be ${getProfileFileSizeLimitMb(file, type)}MB or less.`);
+      return;
+    }
+    try {
+      const value = await readProfileFileData(file, type);
       if (type === "photo") {
         setPhoto(file.name);
         setPhotoData(value);
@@ -1130,14 +1137,15 @@ function InlineAddKidForm({ onCancel, onSaved }: { onCancel: () => void; onSaved
         setSchoolIdCard(file.name);
         setSchoolIdCardData(value);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to read this file.");
+    }
   }
 
   return (
     <form onSubmit={submit} className="rounded-[22px] bg-white p-4 shadow-sm ring-1 ring-[#e9e4fb]">
       <label className="mx-auto grid w-fit place-items-center">
-        <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(event) => { event.currentTarget.blur(); uploadFile(event.target.files?.[0], "photo"); }} />
+        <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(event) => { event.currentTarget.blur(); void uploadFile(event.target.files?.[0], "photo"); }} />
         <span className="relative h-20 w-20">
           <span className="grid h-20 w-20 place-items-center overflow-hidden rounded-full border-2 border-dashed border-[#bdb2f4] bg-[#f3f0ff] text-[#5f4bd2]">
             {photoData ? <img src={photoData} alt="" className="h-full w-full rounded-full object-cover" /> : <Camera size={30} />}
@@ -1158,7 +1166,7 @@ function InlineAddKidForm({ onCancel, onSaved }: { onCancel: () => void; onSaved
         {ageInvalid && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Age cannot be more than 18 years.</p>}
         <KidFormInput label="School Name" value={school} onChange={setSchool} placeholder="e.g. DPS R.K. Puram" />
         <ProfileSelect label="Gender" value={gender} onChange={setGender} options={["All", "Boy", "Girl"]} />
-        <ProfileFileDrop label={schoolIdCard ? schoolIdCard : "Tap to upload School ID"} preview={schoolIdCardData} onFile={(file) => uploadFile(file, "schoolId")} />
+        <ProfileFileDrop label={schoolIdCard ? schoolIdCard : "Tap to upload School ID"} preview={schoolIdCardData} onFile={(file) => { void uploadFile(file, "schoolId"); }} />
       </div>
 
       {status && <p className="mt-3 rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black leading-5 text-[#6655cf]">{status}</p>}
@@ -1256,19 +1264,23 @@ function InlineKidProfileForm({ kid, onSaved }: { kid: AppKid; onSaved: () => Pr
     }
   }
 
-  function uploadSchoolId(file: File | undefined) {
+  async function uploadSchoolId(file: File | undefined) {
     setStatus("");
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus("File size should be 5MB or less.");
+    if (!isSupportedProfileFile(file, "schoolId")) {
+      setStatus("Please upload school ID as PDF, JPG, or PNG.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
+    if (file.size > getProfileFileSizeLimitBytes(file, "schoolId")) {
+      setStatus(`File size should be ${getProfileFileSizeLimitMb(file, "schoolId")}MB or less.`);
+      return;
+    }
+    try {
       setSchoolIdCard(file.name);
-      setSchoolIdCardData(typeof reader.result === "string" ? reader.result : "");
-    };
-    reader.readAsDataURL(file);
+      setSchoolIdCardData(await readProfileFileData(file, "schoolId"));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to read this file.");
+    }
   }
 
   return (
@@ -1314,7 +1326,7 @@ function ProfileFileDrop({ label, preview, onFile }: { label: string; preview?: 
           <Paperclip size={21} />
         </span>
         <span className="mt-3 text-sm font-black text-[#5f4bd2]">{label}</span>
-        <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF, JPG or PNG - Max 5MB</span>
+        <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF max {MAX_PROFILE_DOCUMENT_SIZE_MB}MB; images auto-compress</span>
       </label>
     </div>
   );
@@ -1498,7 +1510,7 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
     else if (status === "Child age cannot be more than 18 years.") setStatus("");
   }
 
-  function uploadFile(file: File | undefined, type: "photo" | "schoolId") {
+  async function uploadFile(file: File | undefined, type: "photo" | "schoolId") {
     setStatus("");
     if (!file) {
       if (type === "photo") {
@@ -1511,14 +1523,18 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus("File size should be 5MB or less.");
+    if (!isSupportedProfileFile(file, type)) {
+      setStatus(type === "photo" ? "Please upload a JPG or PNG child photo." : "Please upload school ID as PDF, JPG, or PNG.");
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = typeof reader.result === "string" ? reader.result : "";
+    if (file.size > getProfileFileSizeLimitBytes(file, type)) {
+      setStatus(`File size should be ${getProfileFileSizeLimitMb(file, type)}MB or less.`);
+      return;
+    }
+
+    try {
+      const value = await readProfileFileData(file, type);
       if (type === "photo") {
         setPhoto(file.name);
         setPhotoData(value);
@@ -1526,8 +1542,9 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
         setSchoolIdCard(file.name);
         setSchoolIdCardData(value);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to read this file.");
+    }
   }
 
   return (
@@ -1549,7 +1566,7 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
       <form onSubmit={submit} className="min-h-0 flex-1 overflow-y-auto px-5 py-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="flex min-h-full flex-col rounded-[26px] bg-white p-4 shadow-sm ring-2 ring-[#e8e2fb]">
           <label className="mx-auto grid w-fit place-items-center">
-            <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(event) => { event.currentTarget.blur(); uploadFile(event.target.files?.[0], "photo"); }} />
+            <input type="file" accept="image/png,image/jpeg" className="hidden" onChange={(event) => { event.currentTarget.blur(); void uploadFile(event.target.files?.[0], "photo"); }} />
             <span className="relative h-24 w-24">
               <span className="grid h-24 w-24 place-items-center overflow-hidden rounded-full border-2 border-dashed border-[#bdb2f4] bg-[#f3f0ff] text-[#5f4bd2]">
                 {photoData ? <img src={photoData} alt="" className="h-full w-full rounded-full object-cover" /> : <Camera size={34} />}
@@ -1572,12 +1589,12 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
 
             {schoolIdCardData && <SchoolIdPreview value={schoolIdCardData} />}
             <label className="grid min-h-32 place-items-center rounded-[22px] border-2 border-dashed border-[#bdb2f4] bg-[#f7f5ff] px-4 py-5 text-center">
-              <input type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(event) => { event.currentTarget.blur(); uploadFile(event.target.files?.[0], "schoolId"); }} />
+              <input type="file" accept="image/png,image/jpeg,application/pdf" className="hidden" onChange={(event) => { event.currentTarget.blur(); void uploadFile(event.target.files?.[0], "schoolId"); }} />
               <span className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-[#5f4bd2] shadow-sm">
                 <Paperclip size={21} />
               </span>
               <span className="mt-3 text-sm font-black text-[#5f4bd2]">{schoolIdCard ? schoolIdCard : "Tap to upload School ID"}</span>
-              <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF, JPG or PNG - Max 5MB</span>
+              <span className="mt-1 text-[11px] font-black text-[#9a96b8]">PDF max {MAX_PROFILE_DOCUMENT_SIZE_MB}MB; images auto-compress</span>
             </label>
           </div>
 
@@ -1723,19 +1740,23 @@ function EditKidSheet({ kid, onClose, onSaved }: { kid: AppKid; onClose: () => v
     }
   }
 
-  function uploadSchoolId(file: File | undefined) {
+  async function uploadSchoolId(file: File | undefined) {
     setStatus("");
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      setStatus("File size should be 5MB or less.");
+    if (!isSupportedProfileFile(file, "schoolId")) {
+      setStatus("Please upload school ID as PDF, JPG, or PNG.");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
+    if (file.size > getProfileFileSizeLimitBytes(file, "schoolId")) {
+      setStatus(`File size should be ${getProfileFileSizeLimitMb(file, "schoolId")}MB or less.`);
+      return;
+    }
+    try {
       setSchoolIdCard(file.name);
-      setSchoolIdCardData(typeof reader.result === "string" ? reader.result : "");
-    };
-    reader.readAsDataURL(file);
+      setSchoolIdCardData(await readProfileFileData(file, "schoolId"));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to read this file.");
+    }
   }
 
   return (
@@ -2312,10 +2333,78 @@ function WhatsAppIcon() {
 }
 
 async function postJson(url: string, body: unknown) {
-  const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let response: Response;
+  try {
+    response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  } catch {
+    throw new Error("Network issue hai. Internet check karke dobara try kijiye.");
+  }
   const data = await response.json().catch(() => ({}));
+  if (response.status === 401) throw new Error("Session expire ho gaya hai. Please login karke dobara try kijiye.");
   if (!response.ok) throw new Error(data.message || "Request failed.");
   return data;
+}
+
+function isSupportedProfileFile(file: File, type: "photo" | "schoolId") {
+  if (type === "photo") return file.type === "image/jpeg" || file.type === "image/png";
+  return file.type === "image/jpeg" || file.type === "image/png" || file.type === "application/pdf";
+}
+
+function getProfileFileSizeLimitMb(file: File, type: "photo" | "schoolId") {
+  return file.type.startsWith("image/") || type === "photo" ? MAX_PROFILE_IMAGE_SIZE_MB : MAX_PROFILE_DOCUMENT_SIZE_MB;
+}
+
+function getProfileFileSizeLimitBytes(file: File, type: "photo" | "schoolId") {
+  return getProfileFileSizeLimitMb(file, type) * 1024 * 1024;
+}
+
+async function readProfileFileData(file: File, type: "photo" | "schoolId") {
+  if (!file.type.startsWith("image/")) return readFileAsDataUrl(file);
+
+  try {
+    return await compressImageFile(file, type === "photo" ? 720 : PROFILE_IMAGE_MAX_SIDE);
+  } catch {
+    return readFileAsDataUrl(file);
+  }
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("Unable to read this file."));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function compressImageFile(file: File, maxSide: number) {
+  const image = await loadImageFromFile(file);
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Unable to prepare image.");
+  context.drawImage(image, 0, 0, width, height);
+  return canvas.toDataURL("image/jpeg", PROFILE_IMAGE_QUALITY);
+}
+
+function loadImageFromFile(file: File) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("Unable to read this image."));
+    };
+    image.src = url;
+  });
 }
 
 function readCachedAppData() {
