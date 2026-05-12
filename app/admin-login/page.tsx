@@ -2,11 +2,9 @@
 
 import { Eye, EyeOff, LockKeyhole, Mail } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 export default function AdminLoginPage() {
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -22,6 +20,7 @@ export default function AdminLoginPage() {
       const response = await fetch("/api/auth/admin-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ email, password }),
       });
       const data = (await response.json()) as { message?: string };
@@ -31,7 +30,7 @@ export default function AdminLoginPage() {
       }
 
       const nextPath = new URLSearchParams(window.location.search).get("next");
-      router.push(nextPath?.startsWith("/admin") ? nextPath : "/admin");
+      window.location.assign(nextPath?.startsWith("/admin") ? nextPath : "/admin");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to login admin.");
     } finally {
@@ -40,7 +39,7 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[] px-4 py-5 text-white">
+    <main className="grid min-h-screen place-items-center bg-[linear-gradient(135deg,#3D32A8,#7B6FD8_62%,#E8B800)] px-5">
       <section className="w-full max-w-[460px] rounded-[24px] border border-white/10 bg-white px-6 py-7 text-[#1a1a1a] shadow-[0_28px_90px_rgba(0,0,0,0.32)] sm:px-8">
         {/* <div className="grid h-14 w-14 place-items-center rounded-2xl bg-[#f6c400] text-[#111827]">
           <ShieldCheck size={30} strokeWidth={2.5} />

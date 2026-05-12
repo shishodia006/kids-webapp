@@ -36,7 +36,7 @@ type VapidConfig = {
 export async function notifyUser(userId: number, payload: PushPayload) {
   if (!userId) return;
   const rows = await queryRows<PushRow>("SELECT user_id, endpoint, payload FROM push_subscriptions WHERE user_id = ?", [userId]);
-  await sendPushRows(rows, payload);
+  await sendPushRows(rows, payload, `user:${userId}`);
 }
 
 export async function notifyUsersByRole(role: "user" | "admin", payload: PushPayload) {
@@ -49,15 +49,23 @@ export async function notifyUsersByRole(role: "user" | "admin", payload: PushPay
     `,
     [role],
   );
-  await sendPushRows(rows, payload);
+  await sendPushRows(rows, payload, `role:${role}`);
 }
 
 export async function notifyAdmins(payload: PushPayload) {
   await notifyUsersByRole("admin", { url: "/admin", tag: "konnectly-admin-action", ...payload });
 }
 
-async function sendPushRows(rows: PushRow[], payload: PushPayload) {
-  if (!rows.length || !getVapidConfig()) return;
+async function sendPushRows(rows: PushRow[], payload: PushPayload, label: string) {
+  const vapid = getVapidConfig();
+  if (!rows.length) {
+    console.warn(`Push skipped for ${label}: no saved subscriptions.`);
+    return;
+  }
+  if (!vapid) {
+    console.warn(`Push skipped for ${label}: VAPID keys are not configured.`);
+    return;
+  }
 
   await Promise.all(
     rows.map(async (row) => {
@@ -65,8 +73,9 @@ async function sendPushRows(rows: PushRow[], payload: PushPayload) {
       try {
         const result = await sendWebPush(parseSubscription(row.payload), payload);
         if (result === "gone") await deleteSubscription(endpoint);
+        console.info(`Push ${result} for ${label}: ${endpointHost(endpoint)}`);
       } catch (error) {
-        console.warn("Push notification failed:", error);
+        console.warn(`Push notification failed for ${label}: ${endpointHost(endpoint)}`, error);
       }
     }),
   );
@@ -84,9 +93,10 @@ async function sendWebPush(subscription: BrowserPushSubscription | null, payload
       "Content-Encoding": "aes128gcm",
       "Content-Type": "application/octet-stream",
       TTL: "2419200",
-      Urgency: "normal",
+      Urgency: "high",
     },
     body,
+    signal: AbortSignal.timeout(8000),
   });
 
   if (response.status === 404 || response.status === 410) return "gone";
@@ -104,7 +114,7 @@ function encryptPushPayload(subscription: BrowserPushSubscription, value: string
   const salt = randomBytes(16);
 
   const prkKey = hmac(authSecret, sharedSecret);
-  const ikm = hmac(prkKey, Buffer.concat([Buffer.from("WebPush: info\0", "utf8"), userPublicKey, serverPublicKey]));
+  const ikm = hkdfExpandBuffer(prkKey, Buffer.concat([Buffer.from("WebPush: info\0", "utf8"), userPublicKey, serverPublicKey]), 32);
   const prk = hmac(salt, ikm);
   const contentEncryptionKey = hkdfExpand(prk, "Content-Encoding: aes128gcm\0", 16);
   const nonce = hkdfExpand(prk, "Content-Encoding: nonce\0", 12);
@@ -170,7 +180,11 @@ function getVapidConfig(): VapidConfig | null {
 }
 
 function hkdfExpand(prk: Buffer, info: string, length: number) {
-  return hmac(prk, Buffer.concat([Buffer.from(info, "utf8"), Buffer.from([1])])).subarray(0, length);
+  return hkdfExpandBuffer(prk, Buffer.from(info, "utf8"), length);
+}
+
+function hkdfExpandBuffer(prk: Buffer, info: Buffer, length: number) {
+  return hmac(prk, Buffer.concat([info, Buffer.from([1])])).subarray(0, length);
 }
 
 function hmac(key: Buffer, value: Buffer) {
@@ -187,4 +201,12 @@ function toBase64Url(value: Buffer) {
 
 function str(value: unknown) {
   return value == null ? "" : String(value);
+}
+
+function endpointHost(endpoint: string) {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return "unknown-endpoint";
+  }
 }

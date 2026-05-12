@@ -438,7 +438,7 @@ Let's grow the community together! 💜`;
       </div>
       <button
         onClick={async () => {
-          await fetch("/api/auth/logout", { method: "POST" });
+          await fetch("/api/auth/logout?scope=user", { method: "POST" });
           setIsAuthed(false);
         }}
         className="flex w-full items-center justify-center gap-2 rounded-xl bg-white py-4 font-black text-red-600 shadow-sm"

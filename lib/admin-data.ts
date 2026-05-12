@@ -389,7 +389,7 @@ export async function createAdminEvent(input: Record<string, unknown>) {
   await runBestEffort("activity create notification", async () => {
     await notifyUsersByRole("user", {
       title: "New activity added",
-      body: `${event.title} is now live in Konnectly.`,
+      body: `${event.title} is now live. Earn up to ${event.pointsEarnable} Konnect Points.`,
       url: "/app?tab=Activities",
       tag: `event-created-${Date.now()}`,
     });
@@ -662,25 +662,24 @@ export async function updateKidStatus(kidId: number, status: "approved" | "rejec
   if (status === "approved") {
     await executeQuery("UPDATE kids SET status = 'approved', konnekt_kode = COALESCE(konnekt_kode, ?) WHERE id = ?", [kode, kidId]);
     await awardReferralOnApproval(kidId);
-    if (kid?.mobile) {
-      const { sendWhatsAppText } = await import("@/lib/auth/otp");
-      await sendWhatsAppText(
-        str(kid.mobile),
-        `Great news! ${str(kid.child_name) || "Your child"}'s profile has been verified. You can now register for events. Explore what's on for them!`,
-      );
-    }
   } else {
     await executeQuery("UPDATE kids SET status = 'rejected' WHERE id = ?", [kidId]);
   }
 
-  await notifyUser(num(kid.parent_id), {
-    title: status === "approved" ? "Child profile approved" : "Child profile needs review",
-    body:
+  await runBestEffort("kid status push notification", async () => {
+    const childName = str(kid.child_name) || "Your child";
+    const body =
       status === "approved"
-        ? `${str(kid.child_name) || "Your child"} is verified. You can book activities now.`
-        : `${str(kid.child_name) || "Your child"} profile was not approved. Please update the details.`,
-    url: "/app?tab=Account",
-    tag: `kid-status-${kidId}`,
+        ? `${childName}'s profile has been approved. You can now register for events and activities.`
+        : `${childName}'s profile needs review. Please update the details.`;
+
+    await notifyUser(num(kid.parent_id), {
+      title: status === "approved" ? "Child profile approved" : "Child profile needs review",
+      body,
+      url: "/app?tab=Account",
+      tag: `kid-status-${kidId}-${status}`,
+      vibrate: [200, 100, 200],
+    });
   });
 }
 
@@ -757,7 +756,6 @@ async function awardReferralOnApproval(kidId: number) {
   if (!referrer || referrer.parentId === referredParentId) return;
 
   const points = 50;
-  const referrerUser = await queryOne<AnyRow>("SELECT parent_name, mobile FROM users WHERE id = ? LIMIT 1", [referrer.parentId]);
   const referrerKids = await queryRows<AnyRow>("SELECT id, child_name FROM kids WHERE parent_id = ? ORDER BY id ASC", [referrer.parentId]);
   const shares = splitPoints(points, referrerKids.length);
 
@@ -805,16 +803,6 @@ async function awardReferralOnApproval(kidId: number) {
         url: "/app?tab=Account",
         tag: `referral-welcome-${kidId}`,
       }),
-    ]);
-
-    const { sendWhatsAppText } = await import("@/lib/auth/otp");
-    await Promise.allSettled([
-      str(referrerUser?.mobile)
-        ? sendWhatsAppText(str(referrerUser?.mobile), `You received ${points} Konnect Points for your referral. ${splitMessage}`)
-        : Promise.resolve(),
-      str(approvedKid?.mobile)
-        ? sendWhatsAppText(str(approvedKid?.mobile), `${points} welcome Konnect Points have been added to ${str(approvedKid?.child_name) || "your first verified kid"} after profile verification.`)
-        : Promise.resolve(),
     ]);
   });
 }

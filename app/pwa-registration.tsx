@@ -72,6 +72,7 @@ export function PwaRegistration() {
       try {
         const registration = await navigator.serviceWorker.register("/konnectly-sw.js", { scope: "/" });
         if (!active) return;
+        void registration.update();
 
         window.konnectlyRequestNotifications = async () => {
           if (!("Notification" in window)) return "denied";
@@ -174,11 +175,12 @@ async function trackAppInstall(source: string) {
 async function savePushSubscription(registration: ServiceWorkerRegistration) {
   if (!("PushManager" in window)) return;
 
-  let subscription = await registration.pushManager.getSubscription();
+  const readyRegistration = await navigator.serviceWorker.ready.catch(() => registration);
+  let subscription = await readyRegistration.pushManager.getSubscription();
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
   if (!subscription && publicKey) {
-    subscription = await registration.pushManager.subscribe({
+    subscription = await readyRegistration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey),
     });
@@ -186,11 +188,47 @@ async function savePushSubscription(registration: ServiceWorkerRegistration) {
 
   if (!subscription) return;
 
-  await fetch("/api/app/push-subscription", {
+  const response = await fetch("/api/app/push-subscription", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ subscription: subscription.toJSON() }),
-  }).catch(() => undefined);
+    credentials: "same-origin",
+    body: JSON.stringify({ subscription: serializePushSubscription(subscription) }),
+  }).catch((error) => {
+    console.warn("Unable to save push subscription:", error);
+    return null;
+  });
+
+  if (response && !response.ok) {
+    const message = await readResponseMessage(response);
+    console.warn(`Unable to save push subscription: ${response.status} ${message}`);
+  }
+}
+
+function serializePushSubscription(subscription: PushSubscription) {
+  const json = subscription.toJSON() as PushSubscriptionJSON & {
+    keys?: Record<string, string>;
+  };
+  const p256dh = subscription.getKey("p256dh");
+  const auth = subscription.getKey("auth");
+
+  return {
+    ...json,
+    endpoint: json.endpoint || subscription.endpoint,
+    keys: {
+      ...json.keys,
+      ...(p256dh ? { p256dh: arrayBufferToBase64Url(p256dh) } : {}),
+      ...(auth ? { auth: arrayBufferToBase64Url(auth) } : {}),
+    },
+  };
+}
+
+async function readResponseMessage(response: Response) {
+  try {
+    const data = await response.clone().json();
+    return typeof data?.message === "string" ? data.message : response.statusText;
+  } catch {
+    return response.statusText;
+  }
 }
 
 function urlBase64ToUint8Array(value: string) {
@@ -204,4 +242,11 @@ function urlBase64ToUint8Array(value: string) {
   }
 
   return output;
+}
+
+function arrayBufferToBase64Url(value: ArrayBuffer) {
+  const bytes = new Uint8Array(value);
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+  return window.btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }

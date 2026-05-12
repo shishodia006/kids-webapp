@@ -190,6 +190,7 @@ export async function sendWhatsAppText(phone: string, message: string, templateI
         "X-Api-Key": apiKey,
       },
       body: buildAnantyaTemplateBody(phone, message),
+      signal: AbortSignal.timeout(8000),
     });
     const detail = await readAnantyaResponse(response);
 

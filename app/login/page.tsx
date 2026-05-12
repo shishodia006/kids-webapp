@@ -42,7 +42,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="grid h-dvh overflow-hidden bg-[#fbf4e5] px-4 py-3 text-[#1a1a1a]">
+    <main className="grid min-h-screen place-items-center bg-[linear-gradient(135deg,#3D32A8,#7B6FD8_62%,#E8B800)] px-5">
       <section className="mx-auto my-auto w-full max-w-[430px] rounded-[22px] border border-zinc-200 bg-white px-6 py-7 text-left shadow-[0_20px_70px_rgba(38,26,7,0.14)]">
         <p className="text-[10px] font-black uppercase tracking-[0.2em] text-[#8b2cf4]">Welcome Back</p>
         <h1 className="mt-2 text-[36px] font-black leading-none tracking-normal" style={{ fontFamily: "Georgia, serif" }}>

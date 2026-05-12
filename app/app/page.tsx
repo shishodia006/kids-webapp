@@ -872,7 +872,7 @@ function AccountScreen({
 
   async function signOut() {
     if (!window.confirm("Are you sure you want to sign out?")) return;
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout?scope=user", { method: "POST" });
     clearCachedAppData();
     window.location.href = "/login";
   }

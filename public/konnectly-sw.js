@@ -1,9 +1,10 @@
 ﻿/* KONNECTLY - Unified Service Worker for Next.js PWA notifications. */
 
-const CACHE_NAME = "konnectly-next-cache-v1";
+const CACHE_NAME = "konnectly-next-cache-v3";
 const DEFAULT_APP_URL = "/app";
 const BRAND_APP_URL = "/brand";
 const ICON_URL = "/pwa-icon-192.png";
+const NETWORK_ONLY_PREFIXES = ["/admin", "/admin-login", "/api/admin", "/api/auth"];
 
 self.addEventListener("install", () => {
   self.skipWaiting();
@@ -21,10 +22,21 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const request = event.request;
+  const url = new URL(request.url);
   const acceptsHtml = request.method === "GET" && request.headers.get("accept")?.includes("text/html");
 
+  if (url.origin === self.location.origin && NETWORK_ONLY_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+    event.respondWith(fetch(request).catch(() => networkOnlyFallbackResponse(request)));
+    return;
+  }
+
   if (request.mode === "navigate" || acceptsHtml) {
-    event.respondWith(fetch(request, { cache: "no-store" }).catch(() => caches.match(request)));
+    event.respondWith(
+      fetch(request, { cache: "no-store" }).catch(async () => {
+        const cached = await caches.match(request);
+        return cached || offlineHtmlResponse();
+      }),
+    );
     return;
   }
 
@@ -34,7 +46,7 @@ self.addEventListener("fetch", (event) => {
     fetch(request).catch(async () => {
       const cached = await caches.match(request);
       if (cached) return cached;
-      throw new Error("Offline and no cached response available.");
+      return new Response("", { status: 504, statusText: "Offline and no cached response available." });
     }),
   );
 });
@@ -146,5 +158,31 @@ async function notifyOpenClients(data) {
         tag: data.tag || "konnectly-notification",
       }),
     ),
+  );
+}
+
+function offlineHtmlResponse() {
+  return new Response(
+    `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Konnectly Offline</title></head><body style="font-family:system-ui,sans-serif;padding:24px"><h1>You're offline</h1><p>Please check your internet connection and try again.</p></body></html>`,
+    {
+      status: 503,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    },
+  );
+}
+
+function networkOnlyFallbackResponse(request) {
+  const acceptsHtml = request.headers.get("accept")?.includes("text/html");
+  if (request.mode === "navigate" || acceptsHtml) return offlineHtmlResponse();
+
+  return new Response(
+    JSON.stringify({
+      message: "Network request failed. Please check your connection and try again.",
+    }),
+    {
+      status: 503,
+      statusText: "Network request failed",
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+    },
   );
 }

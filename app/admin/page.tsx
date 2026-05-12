@@ -148,7 +148,7 @@ export default function AdminPage() {
   }
 
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout?scope=admin", { method: "POST" });
     window.location.href = "/admin-login";
   }
 
@@ -340,7 +340,7 @@ function Memberships({
   onRemoveMember,
 }: {
   data: AdminData;
-  onKidStatus: (kidId: number, status: "approved" | "rejected") => void;
+  onKidStatus: (kidId: number, status: "approved" | "rejected") => Promise<void>;
   onRemoveMember: (member: AdminMember) => void;
 }) {
   const [membershipTab, setMembershipTab] = useState(0);
@@ -703,8 +703,19 @@ function downloadCsv(fileName: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-function PendingApprovals({ kids, onKidStatus }: { kids: AdminKid[]; onKidStatus: (kidId: number, status: "approved" | "rejected") => void }) {
+function PendingApprovals({ kids, onKidStatus }: { kids: AdminKid[]; onKidStatus: (kidId: number, status: "approved" | "rejected") => Promise<void> }) {
   const [openId, setOpenId] = useState(kids[0]?.id ?? 0);
+  const [pendingAction, setPendingAction] = useState<{ kidId: number; status: "approved" | "rejected" } | null>(null);
+
+  async function updateKidStatus(kidId: number, status: "approved" | "rejected") {
+    if (pendingAction) return;
+    setPendingAction({ kidId, status });
+    try {
+      await onKidStatus(kidId, status);
+    } finally {
+      setPendingAction(null);
+    }
+  }
 
   if (kids.length === 0) return <EmptyState text="No pending child profiles. You are all caught up." />;
 
@@ -715,9 +726,10 @@ function PendingApprovals({ kids, onKidStatus }: { kids: AdminKid[]; onKidStatus
           key={profile.id}
           profile={profile}
           isOpen={openId === profile.id}
+          pendingStatus={pendingAction?.kidId === profile.id ? pendingAction.status : null}
           onToggle={() => setOpenId((current) => (current === profile.id ? 0 : profile.id))}
-          onApprove={() => onKidStatus(profile.id, "approved")}
-          onReject={() => onKidStatus(profile.id, "rejected")}
+          onApprove={() => void updateKidStatus(profile.id, "approved")}
+          onReject={() => void updateKidStatus(profile.id, "rejected")}
         />
       ))}
     </div>
@@ -727,16 +739,22 @@ function PendingApprovals({ kids, onKidStatus }: { kids: AdminKid[]; onKidStatus
 function PendingApprovalCard({
   profile,
   isOpen,
+  pendingStatus,
   onToggle,
   onApprove,
   onReject,
 }: {
   profile: AdminKid;
   isOpen: boolean;
+  pendingStatus: "approved" | "rejected" | null;
   onToggle: () => void;
   onApprove: () => void;
   onReject: () => void;
 }) {
+  const approving = pendingStatus === "approved";
+  const rejecting = pendingStatus === "rejected";
+  const actionPending = Boolean(pendingStatus);
+
   return (
     <div className="overflow-hidden rounded-[20px] border-2 border-[#ff9800] bg-white shadow-sm">
       <button onClick={onToggle} className="flex w-full items-center gap-4 bg-[#fff7d7] px-5 py-4 text-left transition hover:bg-[#fff1bd]" type="button">
@@ -776,13 +794,27 @@ function PendingApprovalCard({
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <button onClick={onApprove} className="rounded-full bg-green-500 px-5 py-2.5 text-xs font-black text-white transition hover:bg-green-600" type="button">
-              Approve Profile
+            <button
+              onClick={onApprove}
+              disabled={actionPending}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-green-500 px-5 py-2.5 text-xs font-black text-white transition hover:bg-green-600 disabled:cursor-wait disabled:bg-green-400 disabled:shadow-inner"
+              type="button"
+            >
+              {approving ? <Loader2 className="animate-spin" size={16} /> : <Check size={16} />}
+              {approving ? "Approving..." : "Approve Profile"}
             </button>
-            <button onClick={onReject} className="rounded-full bg-red-500 px-5 py-2.5 text-xs font-black text-white transition hover:bg-red-600" type="button">
-              Reject
+            <button
+              onClick={onReject}
+              disabled={actionPending}
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-red-500 px-5 py-2.5 text-xs font-black text-white transition hover:bg-red-600 disabled:cursor-wait disabled:bg-red-400 disabled:shadow-inner"
+              type="button"
+            >
+              {rejecting ? <Loader2 className="animate-spin" size={16} /> : <X size={16} />}
+              {rejecting ? "Rejecting..." : "Reject"}
             </button>
-            <span className="text-xs font-bold text-[#8f8ba6]">Approval sends WhatsApp and unlocks event booking.</span>
+            <span className="text-xs font-bold text-[#8f8ba6]">
+              {actionPending ? "Submitting and sending app notification..." : "Approval sends an app notification and unlocks event booking."}
+            </span>
           </div>
         </div>
       )}
