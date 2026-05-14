@@ -17,10 +17,39 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const email = typeof body.email === "string" ? body.email.trim() : "";
+    const requestedPhone = normalizeIndianPhone(body.phone);
     const password = typeof body.password === "string" ? body.password : "";
 
+    if (requestedPhone) {
+      const brandUser = await queryOne<BrandUserRow>(
+        "SELECT id, brand_id, email, password, partner_mobile, is_active FROM brand_users WHERE partner_mobile = ? LIMIT 1",
+        [requestedPhone],
+      );
+
+      if (!brandUser) {
+        return Response.json({ message: "No business account found for this mobile number. Please register your business." }, { status: 404 });
+      }
+
+      if (!brandUser.is_active) {
+        return Response.json({ message: "Your business account is pending approval. Konnectly team will activate it shortly." }, { status: 403 });
+      }
+
+      const otp = createOtp(requestedPhone, "login");
+      await sendOtpOnWhatsApp(requestedPhone, otp.code);
+
+      return Response.json({
+        message: "OTP sent on WhatsApp.",
+        requiresOtp: true,
+        requestId: otp.requestId,
+        expiresAt: otp.expiresAt,
+        brandUserId: brandUser.id,
+        brandId: brandUser.brand_id,
+        maskedMobile: maskMobile(requestedPhone),
+      });
+    }
+
     if (!email || !password) {
-      return Response.json({ message: "Please enter brand email and password." }, { status: 400 });
+      return Response.json({ message: "Please enter a registered brand mobile number." }, { status: 400 });
     }
 
     const brandUser = await queryOne<BrandUserRow>(

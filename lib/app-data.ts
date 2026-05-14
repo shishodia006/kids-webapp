@@ -279,7 +279,7 @@ export async function addChildProfile(input: Record<string, unknown>) {
     const notificationResults = await Promise.allSettled([
       sendWhatsAppText(
         user.mobile,
-        `${childName}'s profile is currently under verification. You'll be notified once it's approved. Meanwhile, explore upcoming events for your child!`,
+        `${childName}'s profile is currently under verification.  be notified once it's approved. Meanwhile, explore upcoming events for your child!`,
       ),
       notifyUser(user.id, {
         title: "Child profile submitted",

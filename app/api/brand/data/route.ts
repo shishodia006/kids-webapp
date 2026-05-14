@@ -32,6 +32,21 @@ export async function GET() {
     );
 
     const redeemed = redemptions.filter((item) => String(item.status) === "redeemed").length;
+    const [heroSlides, notifications] = await Promise.all([
+      queryRows<AnyRow>(
+        `SELECT id, title, subtitle, cta_label, target
+         FROM hero_slides
+         WHERE COALESCE(is_active, true) = true
+         ORDER BY sort_order ASC, id DESC
+         LIMIT 8`,
+      ),
+      queryRows<AnyRow>(
+        `SELECT id, message, type, created_at
+         FROM notifications
+         ORDER BY created_at DESC
+         LIMIT 8`,
+      ),
+    ]);
 
     return Response.json({
       brand: {
@@ -41,6 +56,9 @@ export async function GET() {
         mobile: String(brand?.partner_mobile || ""),
         referralCode: String(brand?.referral_code || ""),
         tier: "Silver Partner",
+        description: String(brand?.description || ""),
+        note: String(brand?.note || ""),
+        createdAt: brand?.created_at ? new Date(String(brand.created_at)).toISOString() : "",
       },
       metrics: {
         vouchersRedeemed: redeemed,
@@ -53,11 +71,39 @@ export async function GET() {
         brand: String(item.brand_name || brand?.name || "Partner"),
         points: Number(item.points_spent || 0),
         coupon: String(item.coupon_code || ""),
+        qrCode: String(item.qr_code || ""),
+        expiresAt: item.expires_at ? new Date(String(item.expires_at)).toISOString() : "",
+        redeemedAt: item.redeemed_at ? new Date(String(item.redeemed_at)).toISOString() : "",
+        createdAt: item.created_at ? new Date(String(item.created_at)).toISOString() : "",
         status: String(item.status || "issued"),
       })),
+      updates: [
+        ...heroSlides.map((slide) => ({
+          id: `hero-${String(slide.id)}`,
+          title: String(slide.title || "Konnectly Update"),
+          subtitle: String(slide.subtitle || `${String(brand?.name || "Partner")} can join this campaign.`),
+          ctaLabel: String(slide.cta_label || "View"),
+          target: normalizeUpdateTarget(slide.target),
+          type: "hero",
+        })),
+        ...notifications.map((notification) => ({
+          id: `notification-${String(notification.id)}`,
+          title: String(notification.type || "Update").replace(/^\w/, (letter) => letter.toUpperCase()),
+          subtitle: String(notification.message || "New Konnectly update available."),
+          ctaLabel: "View Opportunities",
+          target: "opportunities",
+          type: "notification",
+        })),
+      ],
     });
   } catch (error) {
     console.error(error);
     return Response.json({ message: "Unable to load brand data." }, { status: 500 });
   }
+}
+
+function normalizeUpdateTarget(value: unknown) {
+  const target = String(value || "").toLowerCase();
+  if (target.includes("upgrade")) return "upgrade";
+  return "opportunities";
 }
