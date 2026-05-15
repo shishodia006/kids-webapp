@@ -98,7 +98,7 @@ export async function assertEmailAvailable(email: unknown) {
 
 export async function createParentAccount(details: ParentSignupDetails) {
   const existing = await findUserByPhone(details.phone);
-  if (existing) return Number(existing.id);
+  if (existing) throw new Error("users_mobile_key");
 
   const parentName = details.fullName || [details.fatherName, details.motherName].filter(Boolean).join(" & ") || "Konnectly Parent";
   const locality = details.cityArea;

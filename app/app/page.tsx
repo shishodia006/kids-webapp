@@ -18,11 +18,11 @@ import {
   LogOut,
   MapPin,
   Paperclip,
+  Phone,
   Plus,
   Printer,
   QrCode,
   Send,
-  Shield,
   Star,
   User,
   Users,
@@ -72,10 +72,11 @@ export default function UserApp() {
   const [editParentOpen, setEditParentOpen] = useState(false);
   const [editingKid, setEditingKid] = useState<AppKid | null>(null);
   const [selectedPass, setSelectedPass] = useState<AppBooking | null>(null);
-  const [currentTime, setCurrentTime] = useState("");
+  const [currentTime, setCurrentTime] = useState(formatCurrentTime());
   const [installWorking, setInstallWorking] = useState(false);
   const [installMessage, setInstallMessage] = useState("");
   const [appInstalled, setAppInstalled] = useState(false);
+  const [installPromptOpen, setInstallPromptOpen] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("default");
 
   const setInitialNav = useCallback((nextData: AppData) => {
@@ -124,8 +125,7 @@ export default function UserApp() {
 
   useEffect(() => {
     function updateTime() {
-      const formatted = new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date()).toUpperCase();
-      setCurrentTime(formatted);
+      setCurrentTime(formatCurrentTime());
     }
 
     updateTime();
@@ -190,8 +190,23 @@ export default function UserApp() {
   }, []);
 
   async function switchKid(kidId: number) {
-    await postJson("/api/app/switch-kid", { kidId });
-    await loadData();
+    const previousData = data;
+    setData((current) => {
+      if (!current) return current;
+      const activeKid = current.kids.find((kid) => kid.id === kidId);
+      return activeKid ? { ...current, activeKid } : current;
+    });
+
+    try {
+      await postJson("/api/app/switch-kid", { kidId });
+      setData((current) => {
+        if (current) cacheAppData(current);
+        return current;
+      });
+    } catch (error) {
+      if (previousData) setData(previousData);
+      setStatus(error instanceof Error ? error.message : "Unable to switch member.");
+    }
   }
 
   async function dismissNotification(notificationId: number) {
@@ -230,6 +245,14 @@ export default function UserApp() {
         return true;
       }
 
+      if (isIosDevice()) {
+        const message = getIosInstallMessage();
+        setInstallMessage(message);
+        setInstallPromptOpen(true);
+        if (showFallback) setStatus(message);
+        return false;
+      }
+
       const installed = await window.konnectlyInstallApp?.();
       if (installed) {
         const message = "Konnectly app install ho gaya hai. Ab aap ise home screen se one-tap open kar sakte hain.";
@@ -239,14 +262,16 @@ export default function UserApp() {
         return true;
       }
 
-      const message = "Browser install prompt is not available right now. Use browser menu > Install app or Add to home screen.";
+      const message = "Install prompt yahan available nahi hai. Neeche diye steps follow karke Konnectly ko Home Screen par add kijiye.";
       setInstallMessage(message);
+      setInstallPromptOpen(true);
       if (showFallback) setStatus(message);
 
       return false;
     } catch {
-      const message = "Unable to open install prompt here. Use browser menu > Install app or Add to home screen.";
+      const message = "Install prompt open nahi ho paaya. Neeche diye steps se Home Screen par add kijiye.";
       setInstallMessage(message);
+      setInstallPromptOpen(true);
       setStatus(message);
       return false;
     } finally {
@@ -371,7 +396,7 @@ export default function UserApp() {
         {data && addKidOpen && <AddKidSheet onClose={() => setAddKidOpen(false)} onSaved={async () => { setAddKidOpen(false); await loadData(); }} />}
         {data && editParentOpen && <EditParentSheet data={data} onClose={() => setEditParentOpen(false)} onSaved={async () => { setEditParentOpen(false); await loadData(); }} />}
         {editingKid && <EditKidSheet kid={editingKid} onClose={() => setEditingKid(null)} onSaved={async () => { setEditingKid(null); await loadData(); }} />}
-        {false && <WidgetPrompt onClose={() => undefined} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} appInstalled={appInstalled} />}
+        {installPromptOpen && <WidgetPrompt onClose={() => setInstallPromptOpen(false)} onInstallApp={handleInstallApp} installWorking={installWorking} installMessage={installMessage} appInstalled={appInstalled} />}
       </section>
     </main>
   );
@@ -535,7 +560,8 @@ function HomeContent({
   const activeKid = data.activeKid;
   const nextEvent = data.events[0];
   const offer = data.brands[0];
-  const nextTierRemaining = Math.max(0, 500 - data.user.konnectPoints);
+  const activeKidPoints = activeKid?.konnektPoints ?? data.user.konnectPoints;
+  const nextTierRemaining = Math.max(0, 500 - activeKidPoints);
 
   return (
     <div className="space-y-3 px-4 py-4">
@@ -556,17 +582,17 @@ function HomeContent({
         </div>
         <button onClick={onOpenPointsHistory} className="relative block w-full overflow-hidden rounded-[20px] bg-[#4d39b6] p-4 text-left text-white shadow-sm transition active:scale-[0.99]" type="button">
           <div className="flex items-center gap-3">
-            <div className="grid h-16 w-16 place-items-center rounded-full bg-[#f6c400] text-2xl font-black text-[#2a2451]">{data.user.konnectPoints}</div>
+            <div className="grid h-16 w-16 place-items-center rounded-full bg-[#f6c400] text-2xl font-black text-[#2a2451]">{activeKidPoints}</div>
             <div className="min-w-0 flex-1">
               <h3 className="text-base font-black">{activeKid?.childName || "Member"}&apos;s Balance</h3>
               <p className="mt-1.5 text-xs font-bold text-white/70">{nextTierRemaining} pts to next tier</p>
               <div className="mt-2 h-1.5 rounded-full bg-white/20">
-                <div className="h-full rounded-full bg-[#f6c400]" style={{ width: `${Math.min(100, (data.user.konnectPoints / 500) * 100)}%` }} />
+                <div className="h-full rounded-full bg-[#f6c400]" style={{ width: `${Math.min(100, (activeKidPoints / 500) * 100)}%` }} />
               </div>
             </div>
             <div className="rounded-2xl border border-white/20 bg-white/10 px-3 py-2 text-center">
               <p className="text-[10px] font-black uppercase text-white/50">Cash Value</p>
-              <p className="mt-1 text-base font-black text-[#f6c400]">₹{Math.floor(data.user.konnectPoints / 10)}</p>
+              <p className="mt-1 text-base font-black text-[#f6c400]">₹{Math.floor(activeKidPoints / 10)}</p>
             </div>
           </div>
         </button>
@@ -992,7 +1018,7 @@ function AccountScreen({
 
 function AccountSummaryCard({ data, onOpenRefer, onEditProfile }: { data: AppData; onOpenRefer: () => void; onEditProfile: () => void }) {
   const user = data.user;
-  const parentName = user.parentName || user.fatherName || "Parent";
+  const parentName = getParentDisplayName(user);
 
   return (
     <section className="rounded-[22px] bg-white px-3.5 pb-3.5 pt-4 text-center shadow-sm ring-1 ring-[#e9e4fb]">
@@ -1003,10 +1029,10 @@ function AccountSummaryCard({ data, onOpenRefer, onEditProfile }: { data: AppDat
       <p className="mt-0.5 text-[11px] font-bold text-[#8d89a6]">{user.email || user.mobile}</p>
 
       <div className="mt-4 grid grid-cols-2 gap-2.5">
-        <AccountStatTile icon={<Shield size={15} />} label="Account" value={user.locality || user.city || "Active"} tone="purple" />
-        <AccountStatTile icon={<Users size={15} />} label="Kids" value={`${data.kids.length} Profiles`} tone="purple" />
-        <AccountStatTile icon={<User size={15} />} label="Mobile" value={user.mobile} tone="gold" />
-        <AccountStatTile icon={<MapPin size={15} />} label="City" value={user.city || user.locality || user.state || "-"} tone="gold" />
+        <AccountStatTile icon={<User size={15} />} label="Father" value={user.fatherName || parentName} tone="purple" />
+        <AccountStatTile icon={<Users size={15} />} label="Mother" value={user.motherName || "Not added"} tone="purple" />
+        <AccountStatTile icon={<Phone size={15} />} label="Primary" value={formatIndianPhone(user.mobile)} tone="gold" />
+        <AccountStatTile icon={<Phone size={15} />} label="Additional" value={formatIndianPhone(user.alternateMobile)} tone="gold" />
       </div>
 
       <div className="mx-auto mt-3.5 w-fit max-w-full rounded-full bg-[#5f4bd2] px-4 py-1.5 text-[10px] font-black tracking-[0.16em] text-[#f6c400]">
@@ -1026,14 +1052,21 @@ function AccountSummaryCard({ data, onOpenRefer, onEditProfile }: { data: AppDat
   );
 }
 
+function getParentDisplayName(user: AppData["user"]) {
+  const father = user.fatherName.trim();
+  const mother = user.motherName.trim();
+  if (father && mother) return `${father} & ${mother}`;
+  return user.parentName || father || mother || "Parent";
+}
+
 function AccountStatTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: string; tone: "purple" | "gold" }) {
   const purple = tone === "purple";
   return (
-    <div className={`min-w-0 rounded-[17px] border px-2.5 py-3 ${purple ? "border-[#eee7ff] bg-[#eee7ff]" : "border-[#efd071] bg-[#fff8df]"}`}>
+    <div className={`grid min-h-[80px] min-w-0 content-center rounded-[17px] border px-2.5 py-3 ${purple ? "border-[#eee7ff] bg-[#eee7ff]" : "border-[#efd071] bg-[#fff8df]"}`}>
       <p className={`flex items-center justify-center gap-1.5 text-[9px] font-black uppercase tracking-[0.12em] ${purple ? "text-[#5f4bd2]" : "text-[#c99000]"}`}>
         {icon} {label}
       </p>
-      <p className="mt-1.5 truncate text-xs font-black text-[#292444]">{value || "-"}</p>
+      <p className="mt-1.5 truncate text-sm font-black text-[#292444]">{value || "-"}</p>
     </div>
   );
 }
@@ -1231,7 +1264,7 @@ function InlineParentProfileForm({ data, onSaved }: { data: AppData; onSaved: ()
         <SheetInput label="State" value={state} onChange={setState} placeholder="State" required={false} />
         <SheetInput label="Pincode" value={pincode} onChange={setPincode} placeholder="Pincode" required={false} />
       </div>
-      <p className="rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black text-[#8d89a6]">Login mobile locked hai: {user.mobile}</p>
+      <p className="rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black text-[#8d89a6]">This number is locked for login: {user.mobile}</p>
       {status && <p className="text-xs font-black text-[#6655cf]">{status}</p>}
       <button disabled={loading || !parentName.trim()} className="rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
         {loading ? "Saving..." : "Save Parent Profile"}
@@ -1800,17 +1833,21 @@ function SheetInput({ label, value, onChange, placeholder, type = "text", requir
 }
 
 function WidgetPrompt({ onClose, onInstallApp, installWorking, installMessage, appInstalled }: { onClose: () => void; onInstallApp: (showFallback?: boolean) => Promise<boolean>; installWorking: boolean; installMessage: string; appInstalled: boolean }) {
+  const ios = isIosDevice();
+  const safari = isSafariBrowser();
+
   return (
     <div className="absolute inset-0 z-50 grid place-items-center bg-[#161332]/70 px-5 backdrop-blur-sm">
       <div className="w-full rounded-[28px] bg-white p-6 text-center shadow-2xl">
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#25d366] text-white"><Download size={28} /></div>
         <h2 className="mt-5 text-2xl font-black leading-tight text-[#292444]">Never miss an event — add Konnectly to your home screen!</h2>
         <div className="mt-5 grid gap-3 text-left">
-          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>iOS:</b> Tap Share in Safari, choose Add to Home Screen, then tap Add.</div>
-          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open browser menu, choose Install app or Add to Home screen, then confirm.</div>
+          {ios && !safari && <div className="rounded-[14px] bg-[#fff8df] p-2.5 text-xs font-bold leading-5 text-[#8a6500]"><b>iPhone:</b> Is page ko Safari me open kijiye. WhatsApp/Instagram/Chrome ke andar Add to Home Screen option nahi dikhta.</div>}
+          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>iPhone Safari:</b> Share button tap kijiye, Add to Home Screen choose kijiye, phir Add tap kijiye.</div>
+          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Browser menu se Install app ya Add to Home screen choose kijiye.</div>
         </div>
         {installMessage && <p className="mt-4 rounded-2xl bg-[#fff8df] p-3 text-xs font-black leading-5 text-[#8a6500]">{installMessage}</p>}
-        <button disabled={installWorking || appInstalled} onClick={async () => { if (await onInstallApp(false)) onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-65" type="button">{appInstalled ? "Already Installed" : installWorking ? "Checking..." : "Add to Home Screen"}</button>
+        <button disabled={installWorking || appInstalled} onClick={async () => { if (ios) onClose(); else if (await onInstallApp(false)) onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-65" type="button">{appInstalled ? "Already Installed" : installWorking ? "Checking..." : ios ? "Got It" : "Add to Home Screen"}</button>
         <button onClick={onClose} className="mt-3 w-full rounded-full border-2 border-[#e3e0f4] px-5 py-3 text-sm font-black text-[#6655cf]" type="button">Maybe Later</button>
       </div>
     </div>
@@ -1911,7 +1948,7 @@ function PointSummary({ label, value, tone }: { label: string; value: string; to
 function ReferBottomSheet({ data, onClose }: { data: AppData; onClose: () => void }) {
   const referCode = data.user.konnektKode || data.activeKid?.konnektKode || "KK-XXXXX";
   const name = data.user.parentName || "a parent";
-  const referText = `Hi! I'm ${name}, a proud Konnectly member. Join us and use my KonnektKode ${referCode}. Bonus points unlock after the first child profile is verified: ${data.referralUrl}`;
+  const referText = `Hi! I'm ${name}, a proud Konnectly member. Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more. Join us and use my KonnektKode ${referCode}. Bonus points unlock after the first child profile is verified: ${data.referralUrl}`;
   const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(referText)}`;
 
   return (
@@ -2462,6 +2499,16 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat("en-IN", { weekday: "short", month: "short", day: "2-digit", year: "numeric" }).format(date);
 }
 
+function formatIndianPhone(value: string) {
+  const digits = value.replace(/\D/g, "").slice(-10);
+  if (!digits) return "Not added";
+  return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+}
+
+function formatCurrentTime() {
+  return new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date()).toUpperCase();
+}
+
 function formatPointHistoryDate(value: string) {
   if (!value) return "Date TBA";
   const date = new Date(value);
@@ -2570,6 +2617,26 @@ function getKidEventEligibility(kid: AppKid, event: AppEvent) {
 
 function isStandaloneApp() {
   return window.matchMedia("(display-mode: standalone)").matches || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+function isIosDevice() {
+  const platform = window.navigator.platform || "";
+  const userAgent = window.navigator.userAgent || "";
+  const iPadOS = platform === "MacIntel" && window.navigator.maxTouchPoints > 1;
+  return /iPad|iPhone|iPod/.test(userAgent) || iPadOS;
+}
+
+function isSafariBrowser() {
+  const userAgent = window.navigator.userAgent || "";
+  return /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(userAgent);
+}
+
+function getIosInstallMessage() {
+  if (!isSafariBrowser()) {
+    return "iPhone par install karne ke liye page Safari me open kijiye, phir Share > Add to Home Screen tap kijiye.";
+  }
+
+  return "iPhone Safari me Share button tap kijiye, Add to Home Screen choose kijiye, phir Add tap kijiye.";
 }
 
 function getPreferredNav(data: AppData): NavLabel {

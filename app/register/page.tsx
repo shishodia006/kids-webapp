@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Bell, BookOpen, Check, ChevronDown, Handshake, Home, KeyRound, MessageCircle, Palette, ShieldCheck, Trophy, Volleyball, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Bell, BookOpen, Check, ChevronDown, Eye, EyeOff, Handshake, Home, KeyRound, MessageCircle, Palette, ShieldCheck, Trophy, Volleyball, type LucideIcon } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -21,27 +21,37 @@ type RegisterDetails = {
 
 const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly is already installed. Open it from your home screen or use the browser's Open in app button.";
 const LOCALITY_OPTIONS = [
-  "DLF Phase 1",
-  "DLF Phase 2",
-  "DLF Phase 3",
-  "DLF Phase 4",
-  "DLF Phase 5",
-  "Sector 40",
-  "Sector 43",
-  "Sector 45",
-  "Sector 46",
-  "Sector 47",
-  "Sector 48",
-  "Sector 50",
-  "Sector 51",
-  "Sector 52",
-  "Sushant Lok",
-  "South City",
-  "Palam Vihar",
-  "Nirvana Country",
-  "Vatika City",
-  "Other",
+  "Wazirpur",
+  "Shalimar Bagh",
+  "Model Town",
+  "Azadpur",
+  "Rana Pratap Bagh",
+  "Shakti Nagar",
+  "Pitampura",
+  "Punjabi Bagh",
+  "Tri Nagar",
+  "Keshav Puram",
+  "Sawan Park",
+  "Bharat Nagar",
+  "Satyawati Colony",
+  "Kabir Nagar",
+  "Nimri Colony",
+  "GT Karnal Road Industrial Area",
+  "Jahangirpuri",
+  "Mukherjee Nagar",
 ];
+
+const LOCALITIES_BY_PINCODE: Record<string, string[]> = {
+  "110007": ["Rana Pratap Bagh", "Shakti Nagar"],
+  "110009": ["Model Town", "Mukherjee Nagar"],
+  "110026": ["Punjabi Bagh"],
+  "110033": ["Azadpur", "GT Karnal Road Industrial Area", "Jahangirpuri"],
+  "110034": ["Pitampura"],
+  "110035": ["Tri Nagar", "Keshav Puram"],
+  "110052": ["Wazirpur", "Sawan Park", "Bharat Nagar", "Satyawati Colony", "Nimri Colony"],
+  "110088": ["Shalimar Bagh"],
+  "110094": ["Kabir Nagar"],
+};
 const WELCOME_PILLARS: Array<{ Icon: LucideIcon; label: string }> = [
   { Icon: Palette, label: "Skills" },
   { Icon: Volleyball, label: "Sports" },
@@ -85,6 +95,8 @@ function RegisterFlow() {
   const [termsRead, setTermsRead] = useState(false);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(0);
@@ -104,6 +116,8 @@ function RegisterFlow() {
   const otpCode = otp.join("");
   const remainingSeconds = Math.max(0, Math.ceil((expiresAt - now) / 1000));
   const resendSeconds = Math.max(0, Math.ceil((sentAt + 30_000 - now) / 1000));
+  const detectedLocalities = pincode.length === 6 ? (LOCALITIES_BY_PINCODE[pincode] ?? []) : [];
+  const localityOptions = detectedLocalities.length > 0 ? detectedLocalities : LOCALITY_OPTIONS;
   const timerLabel = useMemo(() => {
     const minutes = Math.floor(remainingSeconds / 60);
     const seconds = String(remainingSeconds % 60).padStart(2, "0");
@@ -130,6 +144,12 @@ function RegisterFlow() {
       if (key === "fatherName" || key === "motherName") {
         next.fullName = [next.fatherName.trim(), next.motherName.trim()].filter(Boolean).join(" & ");
       }
+      if (key === "pincode") {
+        const localities = LOCALITIES_BY_PINCODE[normalized];
+        if (localities?.length && !localities.includes(next.cityArea)) {
+          next.cityArea = localities[0];
+        }
+      }
       return next;
     });
   }
@@ -140,11 +160,16 @@ function RegisterFlow() {
       return;
     }
 
+    if (isIosDevice()) {
+      setStatus(getIosInstallMessage());
+      return;
+    }
+
     const installed = await window.konnectlyInstallApp?.();
     setStatus(
       installed
         ? "Konnectly has been installed. You can now open it from your home screen with one tap."
-        : "The install prompt is not available yet. Choose Install app or Add to Home Screen from your browser menu.",
+        : "Install prompt is not available here. On iPhone use Safari Share > Add to Home Screen. On Android use browser menu > Install app.",
     );
   }
 
@@ -176,7 +201,7 @@ function RegisterFlow() {
       window.setTimeout(() => otpRefs.current[0]?.focus(), 50);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to send OTP.";
-      if (message.includes("already registered") || message.includes("already linked")) {
+      if (isPrimaryPhoneDuplicateMessage(message)) {
         setStatus("This number is already linked to an account. Sign in instead?");
       } else {
         setStatus(message);
@@ -307,8 +332,8 @@ function RegisterFlow() {
               <Field label="Email Address" required type="email" value={details.email} onChange={(value) => update("email", value)} placeholder="parent@example.com" />
               <TextAreaField label="Home Address" required value={details.address} onChange={(value) => update("address", value)} placeholder="Flat / House No., Building, Street..." />
               <div className="grid gap-3.5 min-[390px]:grid-cols-2">
-                <LocalitySelect value={details.cityArea} onChange={(value) => update("cityArea", value)} />
-                <Field label="Pincode" required value={details.pincode} onChange={(value) => update("pincode", value)} placeholder="122001" inputMode="numeric" maxLength={6} />
+                <Field label="Pincode" required value={details.pincode} onChange={(value) => update("pincode", value)} placeholder="110052" inputMode="numeric" maxLength={6} />
+                <LocalitySelect value={details.cityArea} onChange={(value) => update("cityArea", value)} options={localityOptions} autoDetected={detectedLocalities.length > 0} />
               </div>
               <Field label="Referred by KonnektKode" value={details.referralCode} onChange={(value) => update("referralCode", value)} placeholder="Optional" mono />
               <PrimaryButton disabled={loading || !parentDetailsReady}>
@@ -386,8 +411,8 @@ function RegisterFlow() {
             <h1 className="mt-6 text-3xl font-black">Set Password</h1>
             <p className="mt-3 text-sm font-semibold leading-6 text-zinc-600">{status || `Welcome to Konnectly, ${firstName(details.fullName)}! Your account has been created.`}</p>
             <form onSubmit={setAccountPassword} className="mt-6 grid gap-3.5">
-              <Field label="Password" required type="password" value={password} onChange={setPassword} placeholder="Minimum 8 characters" />
-              <Field label="Confirm Password" required type="password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter password" />
+              <PasswordField label="Password" value={password} onChange={setPassword} placeholder="Minimum 8 characters" visible={showPassword} onToggle={() => setShowPassword((current) => !current)} />
+              <PasswordField label="Confirm Password" value={confirmPassword} onChange={setConfirmPassword} placeholder="Re-enter password" visible={showConfirmPassword} onToggle={() => setShowConfirmPassword((current) => !current)} />
               <PrimaryButton disabled={loading || password.length < 8 || password !== confirmPassword}>{loading ? "Saving..." : "Continue"}</PrimaryButton>
               <Status message={status.includes("Welcome") ? "" : status} />
             </form>
@@ -423,9 +448,13 @@ function WelcomeSlide({ onGetStarted }: { onGetStarted: () => void }) {
         <div className="absolute -right-14 top-0 h-44 w-44 rounded-full bg-white/12" />
         <div className="absolute -left-12 bottom-0 h-36 w-36 rounded-full bg-white/10" />
         <p className="relative text-[11px] font-black uppercase tracking-[0.24em] text-white/55"> ✨ Welcome to</p>
-        <div className="relative mx-auto mt-5 w-fit rounded-[20px] bg-white px-9 py-4 text-3xl font-black text-[#5f4bd3] shadow-xl">
-          K<span className="text-[#c99000]">onn</span>ectly
-        </div>
+ <div className="relative mx-auto mt-5 w-fit rounded-[20px] bg-white px-7 py-3 shadow-xl">
+  <img
+    src="https://www.konnectly.org/images/logo.png"
+    alt="Konnectly Logo"
+    className="h-8 object-contain"
+  />
+</div>
         <h1 className="relative mx-auto mt-8 max-w-[340px] text-xl font-black leading-snug">
           Your kid&apos;s journey to building <span className="text-[#f6c400]">life-ready skills</span> and lifelong friendships is about to begin!
         </h1>
@@ -489,11 +518,16 @@ function TermsContent() {
   return (
     <div className="space-y-4">
       <h2 className="font-black text-[#2f2b55]">What Konnectly Gives You Access To</h2>
-      <p>Discovery of curated kid-friendly activities, workshops, and events in your city. A verified profile system for children. Konnect Points redeemable at partner brands and Refer & Earn benefits for growing the community.</p>
+      <p>Discovery of curated kid-friendly activities, workshops, and events in your city.</p>
+      <p>A verified profile system for children.</p>
+      <p>Konnect Points redeemable at partner brands and Refer & Earn benefits for growing the community.</p>
       <h2 className="font-black text-[#2f2b55]">Consent: Use of Children&apos;s Data & Photos</h2>
-      <p>By registering a child profile, you consent to Konnectly storing the child&apos;s name, date of birth, school name, and school ID card image for profile verification. Konnectly may use anonymised or credited event photos for promotional content. You may withdraw photo consent by contacting support.</p>
+      <p>By registering a child profile, you consent to Konnectly storing the child&apos;s name, date of birth, school name, and school ID card image for profile verification. </p>
+      <p> Konnectly may use anonymised or credited event photos for promotional content.</p>
+      <p> You may withdraw photo consent by contacting support.</p>
       <h2 className="font-black text-[#2f2b55]">Konnectly&apos;s Rights & Responsibilities</h2>
-      <p>Konnectly may verify, approve, or reject child profile submissions, may modify, suspend, or terminate accounts that violate platform guidelines, and may update these terms. Parents will be notified of material changes via push notification and email.</p>
+      <p>Konnectly may verify, approve, or reject child profile submissions, may modify, suspend, or terminate accounts that violate platform guidelines, and may update these terms.</p>
+      <p>Parents will be notified of material changes via push notification and email.</p>
     </div>
   );
 }
@@ -536,14 +570,28 @@ function TextAreaField({ label, value, onChange, placeholder, required }: { labe
   );
 }
 
-function LocalitySelect({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+function PasswordField({ label, value, onChange, placeholder, visible, onToggle }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; visible: boolean; onToggle: () => void }) {
   return (
     <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
-      <span>Locality <span className="text-[#e04572]">*</span></span>
+      <span>{label} <span className="text-[#e04572]">*</span></span>
+      <span className="relative">
+        <input required value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={visible ? "text" : "password"} className="h-12 w-full rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 pr-12 text-xs font-bold outline-none focus:border-[#6655cf]" />
+        <button type="button" aria-label={visible ? `Hide ${label.toLowerCase()}` : `Show ${label.toLowerCase()}`} onClick={onToggle} className="absolute right-2 top-1/2 grid size-9 -translate-y-1/2 place-items-center rounded-full text-[#5f4bd3] transition hover:bg-[#eee7ff] focus:outline-none focus:ring-2 focus:ring-[#dcd7ff]">
+          {visible ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+        </button>
+      </span>
+    </label>
+  );
+}
+
+function LocalitySelect({ value, onChange, options, autoDetected }: { value: string; onChange: (value: string) => void; options: string[]; autoDetected: boolean }) {
+  return (
+    <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
+      <span>Locality <span className="text-[#e04572]">*</span>{autoDetected && <span className="ml-1 text-[10px] text-[#25a85a]">Auto-detected</span>}</span>
       <span className="relative">
         <select required value={value} onChange={(event) => onChange(event.target.value)} className="h-12 w-full appearance-none rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 pr-10 text-xs font-bold outline-none focus:border-[#6655cf]">
           <option value="">Select locality</option>
-          {LOCALITY_OPTIONS.map((locality) => <option key={locality} value={locality}>{locality}</option>)}
+          {options.map((locality) => <option key={locality} value={locality}>{locality}</option>)}
         </select>
         <ChevronDown size={17} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[#9290aa]" />
       </span>
@@ -594,4 +642,29 @@ function Status({ message }: { message: string }) {
 
 function firstName(name: string) {
   return name.trim().split(/\s+/)[0] || "Parent";
+}
+
+function isPrimaryPhoneDuplicateMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (normalized.includes("whatsapp number") || normalized.includes("mobile number")) && normalized.includes("already registered");
+}
+
+function isIosDevice() {
+  const platform = window.navigator.platform || "";
+  const userAgent = window.navigator.userAgent || "";
+  const iPadOS = platform === "MacIntel" && window.navigator.maxTouchPoints > 1;
+  return /iPad|iPhone|iPod/.test(userAgent) || iPadOS;
+}
+
+function isSafariBrowser() {
+  const userAgent = window.navigator.userAgent || "";
+  return /^((?!chrome|android|crios|fxios|edgios).)*safari/i.test(userAgent);
+}
+
+function getIosInstallMessage() {
+  if (!isSafariBrowser()) {
+    return "iPhone par install karne ke liye page Safari me open kijiye, phir Share > Add to Home Screen tap kijiye.";
+  }
+
+  return "iPhone Safari me Share button tap kijiye, Add to Home Screen choose kijiye, phir Add tap kijiye.";
 }

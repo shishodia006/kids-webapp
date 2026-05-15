@@ -241,7 +241,7 @@ export async function getAdminData(): Promise<AdminData> {
       queryRows<AnyRow>(`
         SELECT
           k.id, k.parent_id, k.child_name, k.age, k.block_rank, k.dob, k.school, k.school_id_card,
-          k.photo, k.status, k.konnekt_points, k.created_at,
+          k.photo, k.status, k.konnekt_points, k.created_at, k.updated_at,
           (NULLIF(k.photo_data, '') IS NOT NULL) AS has_photo_data,
           (NULLIF(k.school_id_card_data, '') IS NOT NULL) AS has_school_id_card_data,
           u.parent_name, u.father_name, u.mother_name, u.mobile, u.alternate_mobile, u.locality, u.city, u.address, u.pincode
@@ -253,7 +253,7 @@ export async function getAdminData(): Promise<AdminData> {
       queryRows<AnyRow>(`
         SELECT
           k.id, k.parent_id, k.child_name, k.age, k.block_rank, k.dob, k.school, k.school_id_card,
-          k.photo, k.status, k.konnekt_points, k.created_at,
+          k.photo, k.status, k.konnekt_points, k.created_at, k.updated_at,
           (NULLIF(k.photo_data, '') IS NOT NULL) AS has_photo_data,
           (NULLIF(k.school_id_card_data, '') IS NOT NULL) AS has_school_id_card_data,
           u.parent_name, u.father_name, u.mother_name, u.mobile, u.alternate_mobile, u.locality, u.city, u.address, u.pincode
@@ -660,10 +660,10 @@ export async function updateKidStatus(kidId: number, status: "approved" | "rejec
   if (!kid) throw new Error("Child profile not found.");
   const kode = status === "approved" ? await generateKidCode(kidId) : null;
   if (status === "approved") {
-    await executeQuery("UPDATE kids SET status = 'approved', konnekt_kode = COALESCE(konnekt_kode, ?) WHERE id = ?", [kode, kidId]);
+    await executeQuery("UPDATE kids SET status = 'approved', konnekt_kode = COALESCE(konnekt_kode, ?), updated_at = NOW() WHERE id = ?", [kode, kidId]);
     await awardReferralOnApproval(kidId);
   } else {
-    await executeQuery("UPDATE kids SET status = 'rejected' WHERE id = ?", [kidId]);
+    await executeQuery("UPDATE kids SET status = 'rejected', updated_at = NOW() WHERE id = ?", [kidId]);
   }
 
   await runBestEffort("kid status push notification", async () => {
@@ -745,6 +745,12 @@ async function awardReferralOnApproval(kidId: number) {
   const referredParentId = num(approvedKid?.parent_id);
   const referralCode = str(approvedKid?.referral_code).trim().toUpperCase();
   if (!referredParentId || !referralCode) return;
+
+  const otherApprovedKid = await queryOne<AnyRow>(
+    "SELECT id FROM kids WHERE parent_id = ? AND id <> ? AND status = 'approved' LIMIT 1",
+    [referredParentId, kidId],
+  );
+  if (otherApprovedKid) return;
 
   const existingReward = await queryOne<AnyRow>(
     "SELECT id FROM referral_rewards WHERE referred_parent_id = ? LIMIT 1",
@@ -1077,7 +1083,7 @@ function mapAdminKid(row: AnyRow): AdminKid {
     parent: str(row.parent_name) || [str(row.father_name), str(row.mother_name)].filter(Boolean).join(" & ") || "Parent",
     phone: formatPhone(str(row.mobile)),
     locality: str(row.locality) || str(row.city) || "-",
-    requested: formatRelative(row.created_at),
+    requested: formatProfileTime(row.status, row.created_at, row.updated_at),
     points: num(row.konnekt_points),
     status: normalizeKidStatus(row.status),
   };
@@ -1345,9 +1351,23 @@ function formatTime(value: unknown) {
   return new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
-function formatRelative(value: unknown) {
+function formatProfileTime(status: unknown, createdAt: unknown, updatedAt: unknown) {
+  const normalizedStatus = normalizeKidStatus(status);
+  if (normalizedStatus === "approved") return formatRelative(updatedAt || createdAt, "Approved");
+  if (normalizedStatus === "rejected") return formatRelative(updatedAt || createdAt, "Rejected");
+  return formatRelative(createdAt, "Requested");
+}
+
+function formatRelative(value: unknown, label = "Requested") {
   const date = new Date(String(value));
   if (Number.isNaN(date.getTime())) return "Recently";
-  const hours = Math.max(1, Math.round((Date.now() - date.getTime()) / 36e5));
-  return hours < 24 ? `Requested ${hours}h ago` : `Requested ${Math.round(hours / 24)}d ago`;
+  const minutes = Math.max(0, Math.floor((Date.now() - date.getTime()) / 60_000));
+  if (minutes < 1) return `${label} just now`;
+  if (minutes < 60) return `${label} ${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${label} ${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  return `${label} ${days}d ago`;
 }

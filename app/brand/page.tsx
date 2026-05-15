@@ -101,7 +101,7 @@ export default function BrandPanel() {
   });
   const [brandData, setBrandData] = useState<BrandData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [currentTime, setCurrentTime] = useState("");
+  const [currentTime, setCurrentTime] = useState(formatCurrentTime());
   const submittingRef = useRef(false);
 
   useEffect(() => {
@@ -148,7 +148,7 @@ export default function BrandPanel() {
 
   useEffect(() => {
     function updateTime() {
-      setCurrentTime(new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date()).toUpperCase());
+      setCurrentTime(formatCurrentTime());
     }
 
     updateTime();
@@ -391,7 +391,7 @@ function BrandHeader({ brand, currentTime, activeTab }: { brand: BrandData["bran
 function StatusBar({ currentTime }: { currentTime: string }) {
   return (
     <div className="relative flex h-7 items-center justify-between text-[13px] font-black text-white">
-      <span>{currentTime || "9:41 AM"}</span>
+      <span>{currentTime}</span>
       <span className="flex items-center gap-1.5">
         <Wifi size={15} fill="currentColor" />
         <BatteryFull size={16} />
@@ -481,7 +481,7 @@ function AuthShell({
     <main className="grid min-h-screen place-items-center overflow-hidden bg-[linear-gradient(120deg,#4639ad_0%,#7466da_62%,#d1a217_100%)] px-0 text-[#14112f] sm:px-5">
       <section className="relative flex h-auto w-full max-w-[430px] flex-col overflow-hidden bg-[#4434ad] shadow-2xl sm:rounded-[34px]">
         <div className="flex h-8 shrink-0 items-center justify-between bg-[#3c2fa0] px-5 text-xs font-black text-white">
-          <span>9:41</span>
+          <span>{formatCurrentTime()}</span>
           <span>WiFi</span>
         </div>
         <div className="relative shrink-0 overflow-hidden bg-[#4e40b8] px-5 pb-5 pt-5 text-center text-white">
@@ -674,6 +674,8 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const qrScannerRef = useRef<{ stop: () => void; destroy: () => void } | null>(null);
+  const busyRef = useRef(false);
+  const lastScanRef = useRef("");
   const [manualCode, setManualCode] = useState("");
   const [scannerOn, setScannerOn] = useState(false);
   const [status, setStatus] = useState("");
@@ -682,13 +684,19 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
   const activeIssued = data?.redemptions.filter((item) => item.status === "issued") ?? [];
 
   useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+
+  useEffect(() => {
     if (!scannerOn) return;
     let cancelled = false;
+    lastScanRef.current = "";
 
     async function startScanner() {
       try {
         if (!videoRef.current) return;
         const { default: QrScanner } = await import("qr-scanner");
+        (QrScanner as unknown as { WORKER_PATH?: string }).WORKER_PATH = "/qr-scanner-worker.min.js";
         if (cancelled || !videoRef.current) return;
 
         const hasCamera = await QrScanner.hasCamera();
@@ -701,8 +709,10 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
         const scanner = new QrScanner(
           videoRef.current,
           (result) => {
-            const code = typeof result === "string" ? result : result.data;
-            if (code && !busy) void verifyCode(code);
+            const code = normalizeVoucherCode(typeof result === "string" ? result : result.data);
+            if (!code || busyRef.current || lastScanRef.current === code) return;
+            lastScanRef.current = code;
+            void verifyCode(code);
           },
           {
             highlightScanRegion: true,
@@ -714,7 +724,7 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
 
         qrScannerRef.current = scanner;
         await scanner.start();
-        setStatus("Camera ready. Voucher QR ko frame ke andar rakhein.");
+        setStatus("Camera ready. Please place the voucher QR inside the frame.");
       } catch {
         setStatus("Camera permission nahi mili. Voucher code manually enter kar sakte hain.");
         setScannerOn(false);
@@ -733,10 +743,10 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
     };
   // Scanner loop intentionally calls the latest verifier only after QR detection.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scannerOn, busy]);
+  }, [scannerOn]);
 
   async function verifyCode(rawCode = manualCode) {
-    const code = rawCode.replace(/^QR-/i, "").trim().toUpperCase();
+    const code = normalizeVoucherCode(rawCode);
     if (!code || busy) return;
     setBusy(true);
     setStatus("");
@@ -759,6 +769,23 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
       setStatus(error instanceof Error ? error.message : "Unable to verify voucher.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function scanQrImage(file: File | undefined) {
+    if (!file || busy) return;
+    setStatus("QR image scan kar rahe hain...");
+    setVerified(null);
+
+    try {
+      const { default: QrScanner } = await import("qr-scanner");
+      (QrScanner as unknown as { WORKER_PATH?: string }).WORKER_PATH = "/qr-scanner-worker.min.js";
+      const result = await QrScanner.scanImage(file, { returnDetailedScanResult: true });
+      const code = normalizeVoucherCode(typeof result === "string" ? result : result.data);
+      if (!code) throw new Error("Is image me voucher QR read nahi ho paaya.");
+      await verifyCode(code);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "QR image read nahi ho paaya. Code manually enter kijiye.");
     }
   }
 
@@ -791,7 +818,14 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
 
       <Card className="bg-white">
         <h3 className="font-black">QR not working? Enter manually</h3>
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 grid gap-2">
+          <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#bdb2f4] bg-[#f7f6ff] px-4 text-sm font-black text-[#5b4ec8]">
+            <Upload size={18} />
+            Upload QR Photo
+            <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => { void scanQrImage(event.target.files?.[0]); event.target.value = ""; }} />
+          </label>
+        </div>
+        <div className="mt-3 flex gap-2">
           <input value={manualCode} onChange={(event) => setManualCode(event.target.value.toUpperCase())} className="min-w-0 flex-1 rounded-xl border-2 border-[#e3e0f4] bg-[#f7f6ff] px-4 py-3 text-sm font-black uppercase outline-none focus:border-[#6655cf]" placeholder="KON-XXX-XXXX" />
           <button onClick={() => verifyCode()} disabled={busy || !manualCode.trim()} className="rounded-xl bg-[#6655cf] px-5 text-sm font-black text-white disabled:opacity-50" type="button">
             {busy ? "..." : "Verify"}
@@ -804,12 +838,25 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
       <Card className="bg-white">
         <h3 className="font-black">Pending Vouchers</h3>
         <div className="mt-4 grid gap-3">
-          {activeIssued.slice(0, 5).map((item) => <RedemptionRow key={item.id} item={item} />)}
+          {activeIssued.slice(0, 5).map((item) => (
+            <div key={item.id} className="grid gap-2 rounded-[18px] border border-[#ebe7f7] bg-[#fbfaff] p-2">
+              <RedemptionRow item={item} />
+              <button onClick={() => verifyCode(item.qrCode || item.coupon)} disabled={busy} className="h-10 rounded-full bg-[#25d366] px-4 text-xs font-black text-white disabled:opacity-50" type="button">
+                Approve This Voucher
+              </button>
+            </div>
+          ))}
           {activeIssued.length === 0 && <p className="text-sm font-bold text-zinc-500">No issued vouchers waiting right now.</p>}
         </div>
       </Card>
     </div>
   );
+}
+
+function normalizeVoucherCode(value: string) {
+  const cleanValue = value.trim().toUpperCase();
+  const match = cleanValue.match(/(?:QR-)?KON-[A-Z0-9]+-[A-Z0-9-]+/);
+  return (match?.[0] || cleanValue).replace(/^QR-/i, "");
 }
 
 function Opportunities({ data }: { data: BrandData | null }) {
@@ -1444,4 +1491,8 @@ function formatMonthYear(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "January 2026";
   return new Intl.DateTimeFormat("en-IN", { month: "long", year: "numeric" }).format(date);
+}
+
+function formatCurrentTime() {
+  return new Intl.DateTimeFormat("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).format(new Date()).toUpperCase();
 }

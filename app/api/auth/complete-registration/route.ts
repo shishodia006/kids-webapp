@@ -53,7 +53,15 @@ export async function POST(request: Request) {
 
 function getCreateAccountMessage(error: unknown) {
   if (isDuplicateAccountError(error)) {
-    return "This email or mobile number is already registered. Please login or use different details.";
+    if (isDuplicatePrimaryPhoneError(error)) {
+      return "This WhatsApp number is already registered. Please login instead.";
+    }
+
+    if (isDuplicateEmailError(error)) {
+      return "This email is already registered. Please login or use another email.";
+    }
+
+    return "This account is already registered. Please login or use different details.";
   }
 
   return error instanceof Error ? error.message : "Unable to create your account right now.";
@@ -62,6 +70,16 @@ function getCreateAccountMessage(error: unknown) {
 function isDuplicateAccountError(error: unknown) {
   const text = error instanceof Error ? error.message : String(error ?? "");
   return text.includes("23505") || text.includes("duplicate key value") || text.includes("users_email_key") || text.includes("users_mobile_key");
+}
+
+function isDuplicatePrimaryPhoneError(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  return text.includes("users_mobile_key");
+}
+
+function isDuplicateEmailError(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error ?? "");
+  return text.includes("users_email_key");
 }
 
 function normalizeParentSignup(value: unknown, phone: string) {

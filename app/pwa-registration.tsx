@@ -124,7 +124,7 @@ export function PwaRegistration() {
 }
 
 function isKonnectlyAppInstalled() {
-  return isStandaloneApp() || hasStoredInstallRecord();
+  return isStandaloneApp();
 }
 
 function isStandaloneApp() {
