@@ -97,7 +97,7 @@ function normalizeParentSignup(value: unknown, phone: string) {
   const cityArea = clean(details.cityArea) || clean(details.locality);
   const pincode = clean(details.pincode);
 
-  if (!fatherName || !motherName || !fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !alternateMobile || !address || !cityArea || !/^\d{6}$/.test(pincode)) {
+  if (!fatherName || !motherName || !fullName || !isValidEmailAddress(email) || !alternateMobile || !address || !cityArea || !/^\d{6}$/.test(pincode)) {
     return { ok: false as const, message: "Please complete all required parent details before creating your account." };
   }
 
@@ -123,4 +123,9 @@ function firstName(name: string) {
 
 function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function isValidEmailAddress(value: string) {
+  const email = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !email.includes("..");
 }

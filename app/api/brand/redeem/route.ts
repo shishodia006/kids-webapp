@@ -32,6 +32,8 @@ export async function POST(request: Request) {
     const code = normalizeCode(body.code);
     if (!code) return Response.json({ message: "Please enter a valid voucher code." }, { status: 400 });
     const brand = await queryOne<BrandRow>("SELECT name FROM brands WHERE id = ? LIMIT 1", [session.brandId]);
+    const qrCode = code.startsWith("QR-") ? code : `QR-${code}`;
+    const couponCode = code.replace(/^QR-/i, "");
 
     const redemption = await queryOne<RedemptionRow>(
       `SELECT r.*, k.child_name
@@ -40,7 +42,7 @@ export async function POST(request: Request) {
        WHERE (UPPER(r.coupon_code) = ? OR UPPER(r.qr_code) = ?)
          AND (r.brand_id = ? OR LOWER(r.brand_name) = LOWER(?))
        LIMIT 1`,
-      [code, code.startsWith("QR-") ? code : `QR-${code}`, session.brandId, String(brand?.name || "")],
+      [couponCode, qrCode, session.brandId, String(brand?.name || "")],
     );
 
     if (!redemption) {
@@ -79,7 +81,17 @@ export async function POST(request: Request) {
 
 function normalizeCode(value: unknown) {
   if (typeof value !== "string") return "";
-  return value.trim().replace(/^https?:\/\/\S*?(KON-[A-Z0-9-]+)/i, "$1").toUpperCase();
+  const text = safeDecode(value.trim()).toUpperCase();
+  const match = text.match(/(?:QR-)?KON-[A-Z0-9]+-[A-Z0-9-]+/);
+  return (match?.[0] || text).replace(/[^A-Z0-9-]/g, "");
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function mapRedemption(item: RedemptionRow) {

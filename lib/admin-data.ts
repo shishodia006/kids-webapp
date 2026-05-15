@@ -273,7 +273,7 @@ export async function getAdminData(): Promise<AdminData> {
         ORDER BY b.created_at DESC
         LIMIT 500
       `),
-      queryRows<AnyRow>("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 30"),
+      queryRows<AnyRow>("SELECT * FROM notifications WHERE user_id IS NULL ORDER BY created_at DESC LIMIT 30"),
       queryRows<AnyRow>("SELECT * FROM hero_slides ORDER BY sort_order ASC, created_at DESC LIMIT 20"),
       queryRows<AnyRow>(`
         SELECT b.*, bu.email, bu.referral_code
@@ -847,6 +847,25 @@ async function ensureAdminProductSchema() {
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS qr_code VARCHAR(255)");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS redeemed_at TIMESTAMPTZ");
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      title VARCHAR(190),
+      message TEXT NOT NULL,
+      type VARCHAR(40) NOT NULL DEFAULT 'announcement',
+      url VARCHAR(255),
+      tag VARCHAR(120),
+      seen_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title VARCHAR(190)");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS url VARCHAR(255)");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tag VARCHAR(120)");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ");
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications (user_id, created_at DESC)");
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS hero_slides (
       id SERIAL PRIMARY KEY,

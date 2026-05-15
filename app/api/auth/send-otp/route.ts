@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       const cityArea = typeof registration.cityArea === "string" ? registration.cityArea.trim() : "";
       const pincode = typeof registration.pincode === "string" ? registration.pincode.trim() : "";
 
-      if (!fatherName || !motherName || !fullName || !email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !alternateMobile || !address || !cityArea || !/^\d{6}$/.test(pincode)) {
+      if (!fatherName || !motherName || !fullName || !isValidEmailAddress(email) || !alternateMobile || !address || !cityArea || !/^\d{6}$/.test(pincode)) {
         return Response.json({ message: "Please complete all required parent details before continuing." }, { status: 400 });
       }
 
@@ -75,4 +75,9 @@ function isConnectionRefused(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const maybeError = error as { code?: unknown; errors?: Array<{ code?: unknown }> };
   return maybeError.code === "ECONNREFUSED" || Boolean(maybeError.errors?.some((item) => item.code === "ECONNREFUSED"));
+}
+
+function isValidEmailAddress(value: string) {
+  const email = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !email.includes("..");
 }

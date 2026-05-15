@@ -87,6 +87,9 @@ export async function assertCanRegister(phone: string, referralCode: unknown) {
 export async function assertEmailAvailable(email: unknown) {
   const normalized = typeof email === "string" ? email.trim().toLowerCase() : "";
   if (!normalized) return { ok: true as const };
+  if (!isValidEmailAddress(normalized)) {
+    return { ok: false as const, message: "Please enter a valid email address." };
+  }
 
   const existing = await findUserByEmail(normalized);
   if (existing) {
@@ -94,6 +97,11 @@ export async function assertEmailAvailable(email: unknown) {
   }
 
   return { ok: true as const };
+}
+
+function isValidEmailAddress(value: string) {
+  const email = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !email.includes("..");
 }
 
 export async function createParentAccount(details: ParentSignupDetails) {

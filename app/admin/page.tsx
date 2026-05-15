@@ -2077,7 +2077,7 @@ async function requestJson(url: string, options: { method: "POST" | "PATCH" | "D
   const response = await fetch(url, { method: options.method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(options.body) });
   const data = await response.json().catch(() => ({}));
   if (response.status === 401) {
-    throw new Error("Admin session expire ho gaya hai. Please login karke dobara try kijiye.");
+    throw new Error("Your admin session has expired. Please log in again and try once more.");
   }
   if (!response.ok) throw new Error(data.message || "Request failed.");
   return data;

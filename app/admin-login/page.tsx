@@ -104,7 +104,7 @@ export default function AdminLoginPage() {
           </button>
 
           <p className="text-center text-[11px] font-black  tracking-[0.18em] text-zinc-400">
-            Version · v1.0.5
+            Version · v1.0.6
           </p>
         </form>
 

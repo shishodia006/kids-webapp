@@ -778,14 +778,12 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
     setVerified(null);
 
     try {
-      const { default: QrScanner } = await import("qr-scanner");
-      (QrScanner as unknown as { WORKER_PATH?: string }).WORKER_PATH = "/qr-scanner-worker.min.js";
-      const result = await QrScanner.scanImage(file, { returnDetailedScanResult: true });
-      const code = normalizeVoucherCode(typeof result === "string" ? result : result.data);
-      if (!code) throw new Error("Is image me voucher QR read nahi ho paaya.");
+      const scanned = await scanVoucherImage(file);
+      const code = normalizeVoucherCode(scanned);
+      if (!code) throw new Error("Unable to read the QR image. Please enter the code manually.");
       await verifyCode(code);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "QR image read nahi ho paaya. Code manually enter kijiye.");
+      setStatus(error instanceof Error ? error.message : "Unable to read the QR image. Please enter the code manually.");
     }
   }
 
@@ -855,8 +853,50 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
 
 function normalizeVoucherCode(value: string) {
   const cleanValue = value.trim().toUpperCase();
-  const match = cleanValue.match(/(?:QR-)?KON-[A-Z0-9]+-[A-Z0-9-]+/);
+  const decodedValue = safeDecode(cleanValue);
+  const match = decodedValue.match(/(?:QR-)?KON-[A-Z0-9]+-[A-Z0-9-]+/);
   return (match?.[0] || cleanValue).replace(/^QR-/i, "");
+}
+
+async function scanVoucherImage(file: File) {
+  const detectorResult = await scanImageWithBarcodeDetector(file);
+  if (detectorResult) return detectorResult;
+
+  const { default: QrScanner } = await import("qr-scanner");
+  const result = await QrScanner.scanImage(file, {
+    returnDetailedScanResult: true,
+    alsoTryWithoutScanRegion: true,
+  });
+  return typeof result === "string" ? result : result.data;
+}
+
+async function scanImageWithBarcodeDetector(file: File) {
+  const BarcodeDetectorCtor = (window as unknown as {
+    BarcodeDetector?: new (options: { formats: string[] }) => {
+      detect: (source: ImageBitmap) => Promise<Array<{ rawValue?: string }>>;
+    };
+  }).BarcodeDetector;
+  if (!BarcodeDetectorCtor || !("createImageBitmap" in window)) return "";
+
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(file);
+    const detector = new BarcodeDetectorCtor({ formats: ["qr_code"] });
+    const codes = await detector.detect(bitmap);
+    return codes[0]?.rawValue || "";
+  } catch {
+    return "";
+  } finally {
+    bitmap?.close();
+  }
+}
+
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function Opportunities({ data }: { data: BrandData | null }) {

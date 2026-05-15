@@ -53,7 +53,7 @@ const navItems: Array<{ label: NavLabel; icon: string }> = [
 ];
 
 const APP_DATA_CACHE_KEY = "konnectly_app_data_v1";
-const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app already installed hai. Home screen se open kijiye ya browser ke Open in app button par tap kijiye.";
+const APP_ALREADY_INSTALLED_MESSAGE = "Konnectly app is already installed. Please open it from your home screen or tap the browser's 'Open in app' button.";
 const MAX_PROFILE_IMAGE_SIZE_MB = 8;
 const MAX_PROFILE_DOCUMENT_SIZE_MB = 2;
 const PROFILE_IMAGE_MAX_SIDE = 1200;
@@ -255,21 +255,21 @@ export default function UserApp() {
 
       const installed = await window.konnectlyInstallApp?.();
       if (installed) {
-        const message = "Konnectly app install ho gaya hai. Ab aap ise home screen se one-tap open kar sakte hain.";
+        const message = "Konnectly has been installed. You can now open it from your home screen with one tap.";
         setAppInstalled(true);
         setStatus(message);
         setInstallMessage(message);
         return true;
       }
 
-      const message = "Install prompt yahan available nahi hai. Neeche diye steps follow karke Konnectly ko Home Screen par add kijiye.";
+      const message = "The install prompt is not available here. Follow the steps below to add Konnectly to your Home Screen.";
       setInstallMessage(message);
       setInstallPromptOpen(true);
       if (showFallback) setStatus(message);
 
       return false;
     } catch {
-      const message = "Install prompt open nahi ho paaya. Neeche diye steps se Home Screen par add kijiye.";
+      const message = "The install prompt could not be opened. Follow the steps below to add Konnectly to your Home Screen.";
       setInstallMessage(message);
       setInstallPromptOpen(true);
       setStatus(message);
@@ -1140,7 +1140,7 @@ function InlineAddKidForm({ onCancel, onSaved }: { onCancel: () => void; onSaved
   function updateDob(value: string) {
     setDob(value);
     const nextAge = getAgeFromDob(value);
-    setAgeInput(nextAge ? String(nextAge) : "");
+    setAgeInput(value ? String(nextAge) : "");
   }
 
   function updateAge(value: string) {
@@ -1193,8 +1193,8 @@ function InlineAddKidForm({ onCancel, onSaved }: { onCancel: () => void; onSaved
       <div className="mt-4 grid gap-3">
         <KidFormInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="e.g. Aarav Sharma" />
         <div className="grid grid-cols-2 gap-3">
-          <KidFormInput label="Age" value={ageInput} onChange={updateAge} placeholder="Age" type="number" min="0" max="18" />
           <KidFormInput label="Date of Birth" value={dob} onChange={updateDob} placeholder="" type="date" min={dateYearsAgo(18)} max={todayDateInput()} />
+          <KidFormInput label="Age" value={ageInput} onChange={updateAge} placeholder="Auto" type="number" min="0" max="18" readOnly />
         </div>
         {ageInvalid && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Age cannot be more than 18 years.</p>}
         <KidFormInput label="School Name" value={school} onChange={setSchool} placeholder="e.g. DPS R.K. Puram" />
@@ -1228,9 +1228,14 @@ function InlineParentProfileForm({ data, onSaved }: { data: AppData; onSaved: ()
   const [pincode, setPincode] = useState(user.pincode);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const emailInvalid = Boolean(email.trim()) && !isValidEmailAddress(email);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (emailInvalid) {
+      setStatus("Please enter a valid email address.");
+      return;
+    }
     setLoading(true);
     setStatus("");
     try {
@@ -1247,6 +1252,7 @@ function InlineParentProfileForm({ data, onSaved }: { data: AppData; onSaved: ()
     <form onSubmit={submit} className="grid gap-3">
       <SheetInput label="Parent Name" value={parentName} onChange={setParentName} placeholder="Parent name" />
       <SheetInput label="Email" value={email} onChange={setEmail} placeholder="parent@example.com" type="email" required={false} />
+      {emailInvalid && <p className="-mt-1 rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Please enter a valid email address.</p>}
       <div className="grid grid-cols-2 gap-3">
         <SheetInput label="Father Name" value={fatherName} onChange={setFatherName} placeholder="Father name" required={false} />
         <SheetInput label="Mother Name" value={motherName} onChange={setMotherName} placeholder="Mother name" required={false} />
@@ -1266,7 +1272,7 @@ function InlineParentProfileForm({ data, onSaved }: { data: AppData; onSaved: ()
       </div>
       <p className="rounded-2xl bg-[#f3f0ff] px-4 py-3 text-xs font-black text-[#8d89a6]">This number is locked for login: {user.mobile}</p>
       {status && <p className="text-xs font-black text-[#6655cf]">{status}</p>}
-      <button disabled={loading || !parentName.trim()} className="rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
+      <button disabled={loading || !parentName.trim() || emailInvalid} className="rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
         {loading ? "Saving..." : "Save Parent Profile"}
       </button>
     </form>
@@ -1533,7 +1539,7 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
   function updateDob(value: string) {
     setDob(value);
     const nextAge = getAgeFromDob(value);
-    setAgeInput(nextAge ? String(nextAge) : "");
+    setAgeInput(value ? String(nextAge) : "");
   }
 
   function updateAge(value: string) {
@@ -1614,8 +1620,8 @@ function AddKidSheet({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
           <div className="mt-5 grid gap-3.5">
             <KidFormInput label="Child's Full Name" value={childName} onChange={setChildName} placeholder="e.g. Aarav Sharma" />
             <div className="grid grid-cols-2 gap-3">
-              <KidFormInput label="Age" value={ageInput} onChange={updateAge} placeholder="Age" type="number" min="0" max="18" />
               <KidFormInput label="Date of Birth" value={dob} onChange={updateDob} placeholder="" type="date" min={dateYearsAgo(18)} max={todayDateInput()} />
+              <KidFormInput label="Age" value={ageInput} onChange={updateAge} placeholder="Auto" type="number" min="0" max="18" readOnly />
             </div>
             {ageInvalid && <p className="rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Age cannot be more than 18 years.</p>}
             <KidFormInput label="School Name" value={school} onChange={setSchool} placeholder="e.g. DPS R.K. Puram" />
@@ -1700,9 +1706,14 @@ function EditParentSheet({ data, onClose, onSaved }: { data: AppData; onClose: (
   const [pincode, setPincode] = useState(user.pincode);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const emailInvalid = Boolean(email.trim()) && !isValidEmailAddress(email);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (emailInvalid) {
+      setStatus("Please enter a valid email address.");
+      return;
+    }
     setLoading(true);
     setStatus("");
     try {
@@ -1726,6 +1737,7 @@ function EditParentSheet({ data, onClose, onSaved }: { data: AppData; onClose: (
         <div className="mt-5 grid gap-3">
           {/* <SheetInput label="Parent Name" value={parentName} onChange={setParentName} placeholder="Parent name" /> */}
           <SheetInput label="Email" value={email} onChange={setEmail} placeholder="parent@example.com" type="email" required={false} />
+          {emailInvalid && <p className="-mt-1 rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Please enter a valid email address.</p>}
           <SheetInput label="Father Name" value={fatherName} onChange={setFatherName} placeholder="Father name" required={false} />
           <SheetInput label="Mother Name" value={motherName} onChange={setMotherName} placeholder="Mother name" required={false} />
           <SheetInput label="Alternate Mobile" value={alternateMobile} onChange={setAlternateMobile} placeholder="Alternate mobile" required={false} />
@@ -1741,7 +1753,7 @@ function EditParentSheet({ data, onClose, onSaved }: { data: AppData; onClose: (
           </div>
         </div>
         {status && <p className="mt-3 text-xs font-black text-[#6655cf]">{status}</p>}
-        <button disabled={loading || !parentName.trim()} className="mt-5 w-full rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
+        <button disabled={loading || !parentName.trim() || emailInvalid} className="mt-5 w-full rounded-full bg-[#6754d6] px-5 py-3 text-sm font-black text-white disabled:opacity-50" type="submit">
           {loading ? "Saving..." : "Save Parent Profile"}
         </button>
       </form>
@@ -1842,9 +1854,9 @@ function WidgetPrompt({ onClose, onInstallApp, installWorking, installMessage, a
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-[#25d366] text-white"><Download size={28} /></div>
         <h2 className="mt-5 text-2xl font-black leading-tight text-[#292444]">Never miss an event — add Konnectly to your home screen!</h2>
         <div className="mt-5 grid gap-3 text-left">
-          {ios && !safari && <div className="rounded-[14px] bg-[#fff8df] p-2.5 text-xs font-bold leading-5 text-[#8a6500]"><b>iPhone:</b> Is page ko Safari me open kijiye. WhatsApp/Instagram/Chrome ke andar Add to Home Screen option nahi dikhta.</div>}
-          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>iPhone Safari:</b> Share button tap kijiye, Add to Home Screen choose kijiye, phir Add tap kijiye.</div>
-          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Browser menu se Install app ya Add to Home screen choose kijiye.</div>
+          {ios && !safari && <div className="rounded-[14px] bg-[#fff8df] p-2.5 text-xs font-bold leading-5 text-[#8a6500]"><b>iPhone:</b> Open this page in Safari. Add to Home Screen is usually not available inside WhatsApp, Instagram, or Chrome.</div>}
+          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>iPhone Safari:</b> Tap the Share button, choose Add to Home Screen, then tap Add.</div>
+          <div className="rounded-[14px] bg-[#f7f5ff] p-2.5 text-xs font-bold leading-5 text-[#292444]"><b>Android:</b> Open the browser menu and choose Install app or Add to Home screen.</div>
         </div>
         {installMessage && <p className="mt-4 rounded-2xl bg-[#fff8df] p-3 text-xs font-black leading-5 text-[#8a6500]">{installMessage}</p>}
         <button disabled={installWorking || appInstalled} onClick={async () => { if (ios) onClose(); else if (await onInstallApp(false)) onClose(); }} className="mt-5 w-full rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-65" type="button">{appInstalled ? "Already Installed" : installWorking ? "Checking..." : ios ? "Got It" : "Add to Home Screen"}</button>
@@ -1946,10 +1958,22 @@ function PointSummary({ label, value, tone }: { label: string; value: string; to
 }
 
 function ReferBottomSheet({ data, onClose }: { data: AppData; onClose: () => void }) {
-  const referCode = data.user.konnektKode || data.activeKid?.konnektKode || "KK-XXXXX";
+  const referCode =
+    data.user.konnektKode || data.activeKid?.konnektKode || "KK-XXXXX";
+
   const name = data.user.parentName || "a parent";
-  const referText = `Hi! I'm ${name}, a proud Konnectly member. Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more. Join us and use my KonnektKode ${referCode}. Bonus points unlock after the first child profile is verified: ${data.referralUrl}`;
+
+  const referText = `Hi! I'm ${name}, a proud Konnectly member.
+
+Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more! 🥳🎁🧑‍🧑‍🧒‍🧒
+
+Join us and use my KonnektKode ${referCode}.
+
+Bonus points unlock after the first child profile is verified:
+${data.referralUrl}`;
+
   const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(referText)}`;
+  
 
   return (
     <div className="absolute inset-0 z-40 flex items-end bg-[#161332]/55 backdrop-blur-sm">
@@ -2086,6 +2110,7 @@ function EmptyState({ text }: { text: string }) {
 }
 
 function QrMock({ seed, small }: { seed: string; small?: boolean }) {
+  const [imageFailed, setImageFailed] = useState(false);
   const qr = useMemo(() => createQrMatrix(seed || "KONNECTLY"), [seed]);
   const quietZone = 4;
   const viewSize = qr.length + quietZone * 2;
@@ -2101,12 +2126,27 @@ function QrMock({ seed, small }: { seed: string; small?: boolean }) {
 
   return (
     <div className={`grid place-items-center rounded-[14px] bg-white ${small ? "h-14 w-14 p-1" : "h-44 w-44 p-2"} shadow-[inset_0_0_0_1px_rgba(41,36,68,0.08)]`}>
-      <svg viewBox={`0 0 ${viewSize} ${viewSize}`} role="img" aria-label="Scannable QR code" className="h-full w-full" shapeRendering="crispEdges">
-        <rect width={viewSize} height={viewSize} fill="#fff" />
-        <path d={darkPath} fill="#111827" />
-      </svg>
+      {!imageFailed ? (
+        <img
+          src={qrImageUrl(seed || "KONNECTLY")}
+          alt="Scannable QR code"
+          className="h-full w-full object-contain"
+          referrerPolicy="no-referrer"
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <svg viewBox={`0 0 ${viewSize} ${viewSize}`} role="img" aria-label="Scannable QR code" className="h-full w-full" shapeRendering="crispEdges">
+          <rect width={viewSize} height={viewSize} fill="#fff" />
+          <path d={darkPath} fill="#111827" />
+        </svg>
+      )}
     </div>
   );
+}
+
+function qrImageUrl(value: string) {
+  const size = 520;
+  return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=24&data=${encodeURIComponent(value)}`;
 }
 
 function createQrMatrix(value: string) {
@@ -2374,10 +2414,10 @@ async function postJson(url: string, body: unknown) {
   try {
     response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   } catch {
-    throw new Error("Network issue hai. Internet check karke dobara try kijiye.");
+    throw new Error("Network issue. Please check your internet connection and try again.");
   }
   const data = await response.json().catch(() => ({}));
-  if (response.status === 401) throw new Error("Session expire ho gaya hai. Please login karke dobara try kijiye.");
+  if (response.status === 401) throw new Error("Your session has expired. Please log in and try again.");
   if (!response.ok) throw new Error(data.message || "Request failed.");
   return data;
 }
@@ -2503,6 +2543,11 @@ function formatIndianPhone(value: string) {
   const digits = value.replace(/\D/g, "").slice(-10);
   if (!digits) return "Not added";
   return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+}
+
+function isValidEmailAddress(value: string) {
+  const email = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !email.includes("..");
 }
 
 function formatCurrentTime() {
@@ -2633,10 +2678,10 @@ function isSafariBrowser() {
 
 function getIosInstallMessage() {
   if (!isSafariBrowser()) {
-    return "iPhone par install karne ke liye page Safari me open kijiye, phir Share > Add to Home Screen tap kijiye.";
+    return "To install on iPhone, open this page in Safari, then tap Share > Add to Home Screen.";
   }
 
-  return "iPhone Safari me Share button tap kijiye, Add to Home Screen choose kijiye, phir Add tap kijiye.";
+  return "In iPhone Safari, tap the Share button, choose Add to Home Screen, then tap Add.";
 }
 
 function getPreferredNav(data: AppData): NavLabel {

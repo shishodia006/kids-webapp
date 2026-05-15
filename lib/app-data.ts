@@ -188,7 +188,16 @@ export async function getAppData(origin = ""): Promise<AppData> {
       [user.id],
     ).then((rows) => rows.map(mapBooking)),
     safeRows<BrandRow>("SELECT * FROM brands WHERE COALESCE(is_active, true) = true ORDER BY points_cost ASC, id ASC").then((rows) => rows.map(mapBrand)),
-    safeRows<NotificationRow>("SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20").then((rows) => rows.map(mapNotification)),
+    safeRows<NotificationRow>(
+      `
+        SELECT *
+        FROM notifications
+        WHERE user_id IS NULL OR user_id = ?
+        ORDER BY created_at DESC
+        LIMIT 20
+      `,
+      [user.id],
+    ).then((rows) => rows.map(mapNotification)),
     safeRows<HeroSlideRow>("SELECT * FROM hero_slides WHERE COALESCE(is_active, true) = true ORDER BY sort_order ASC, created_at DESC LIMIT 5").then((rows) => rows.map(mapHeroSlide)),
     safeRows<RewardHistoryRow>(
       `SELECT r.*
@@ -319,7 +328,7 @@ export async function updateParentProfile(input: Record<string, unknown>) {
   const pincode = clean(input.pincode);
 
   if (!parentName) throw new Error("Parent name is required.");
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("Please enter a valid email address.");
+  if (email && !isValidEmailAddress(email)) throw new Error("Please enter a valid email address.");
 
   await executeQuery(
     `
@@ -758,6 +767,11 @@ function clean(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function isValidEmailAddress(value: string) {
+  const email = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !email.includes("..");
+}
+
 function num(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -817,6 +831,25 @@ async function ensureProductSchema() {
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS qr_code VARCHAR(255)");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ");
   await executeQuery("ALTER TABLE redemptions ADD COLUMN IF NOT EXISTS redeemed_at TIMESTAMPTZ");
+  await executeQuery(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      title VARCHAR(190),
+      message TEXT NOT NULL,
+      type VARCHAR(40) NOT NULL DEFAULT 'announcement',
+      url VARCHAR(255),
+      tag VARCHAR(120),
+      seen_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title VARCHAR(190)");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS url VARCHAR(255)");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tag VARCHAR(120)");
+  await executeQuery("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS seen_at TIMESTAMPTZ");
+  await executeQuery("CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications (user_id, created_at DESC)");
   await executeQuery(`
     CREATE TABLE IF NOT EXISTS hero_slides (
       id SERIAL PRIMARY KEY,

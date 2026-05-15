@@ -48,7 +48,7 @@ const LOCALITIES_BY_PINCODE: Record<string, string[]> = {
   "110033": ["Azadpur", "GT Karnal Road Industrial Area", "Jahangirpuri"],
   "110034": ["Pitampura"],
   "110035": ["Tri Nagar", "Keshav Puram"],
-  "110052": ["Wazirpur", "Sawan Park", "Bharat Nagar", "Satyawati Colony", "Nimri Colony"],
+  "110052": ["Wazirpur", "Sawan Park", "Ashok Vihar", "Bharat Nagar", "Satyawati Colony", "Nimri Colony"],
   "110088": ["Shalimar Bagh"],
   "110094": ["Kabir Nagar"],
 };
@@ -104,13 +104,14 @@ function RegisterFlow() {
   const phone = details.phone.replace(/\D/g, "").slice(-10);
   const alternatePhone = details.alternateMobile.replace(/\D/g, "").slice(-10);
   const pincode = details.pincode.replace(/\D/g, "").slice(0, 6);
+  const emailValid = isValidEmailAddress(details.email);
   const parentDetailsReady =
     phone.length === 10 &&
     alternatePhone.length === 10 &&
     pincode.length === 6 &&
     Boolean(details.fatherName.trim()) &&
     Boolean(details.motherName.trim()) &&
-    Boolean(details.email.trim()) &&
+    emailValid &&
     Boolean(details.address.trim()) &&
     Boolean(details.cityArea.trim());
   const otpCode = otp.join("");
@@ -179,6 +180,10 @@ function RegisterFlow() {
     setStatus("");
 
     try {
+      if (!emailValid) {
+        throw new Error("Please enter a valid email address.");
+      }
+
       const response = await fetch("/api/auth/send-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -329,7 +334,8 @@ function RegisterFlow() {
               <Field label="Mother's Full Name" required value={details.motherName} onChange={(value) => update("motherName", value)} placeholder="e.g. Priya Sharma" />
               <PhoneField label="Primary Phone Number" value={details.phone} onChange={(value) => update("phone", value)} />
               <PhoneField label="Alternate Number" value={details.alternateMobile} onChange={(value) => update("alternateMobile", value)} placeholder="91234 56789" />
-              <Field label="Email Address" required type="email" value={details.email} onChange={(value) => update("email", value)} placeholder="parent@example.com" />
+              <Field label="Email Address" required type="email" inputMode="email" pattern={EMAIL_PATTERN_SOURCE} value={details.email} onChange={(value) => update("email", value)} placeholder="parent@example.com" />
+              {details.email.trim() && !emailValid && <p className="-mt-2 rounded-2xl bg-red-50 px-4 py-3 text-xs font-black text-red-600">Please enter a valid email address.</p>}
               <TextAreaField label="Home Address" required value={details.address} onChange={(value) => update("address", value)} placeholder="Flat / House No., Building, Street..." />
               <div className="grid gap-3.5 min-[390px]:grid-cols-2">
                 <Field label="Pincode" required value={details.pincode} onChange={(value) => update("pincode", value)} placeholder="110052" inputMode="numeric" maxLength={6} />
@@ -542,6 +548,7 @@ function Field({
   mono,
   inputMode,
   maxLength,
+  pattern,
 }: {
   label: string;
   value: string;
@@ -552,11 +559,12 @@ function Field({
   mono?: boolean;
   inputMode?: "none" | "text" | "tel" | "url" | "email" | "numeric" | "decimal" | "search";
   maxLength?: number;
+  pattern?: string;
 }) {
   return (
     <label className="grid gap-1 text-[11px] font-black text-[#2f2b55]">
       <span>{label} {required && <span className="text-[#e04572]">*</span>}</span>
-      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} inputMode={inputMode} maxLength={maxLength} className={`h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf] ${mono ? "font-mono uppercase tracking-[0.12em]" : ""}`} />
+      <input required={required} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} type={type} inputMode={inputMode} maxLength={maxLength} pattern={pattern} className={`h-12 rounded-2xl border-2 border-[#e3e0f4] bg-white px-3.5 text-xs font-bold outline-none focus:border-[#6655cf] ${mono ? "font-mono uppercase tracking-[0.12em]" : ""}`} />
     </label>
   );
 }
@@ -644,6 +652,13 @@ function firstName(name: string) {
   return name.trim().split(/\s+/)[0] || "Parent";
 }
 
+const EMAIL_PATTERN_SOURCE = "[^\\s@]+@[^\\s@]+\\.[A-Za-z]{2,}";
+
+function isValidEmailAddress(value: string) {
+  const email = value.trim();
+  return /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/.test(email) && !email.includes("..");
+}
+
 function isPrimaryPhoneDuplicateMessage(message: string) {
   const normalized = message.toLowerCase();
   return (normalized.includes("whatsapp number") || normalized.includes("mobile number")) && normalized.includes("already registered");
@@ -662,9 +677,9 @@ function isSafariBrowser() {
 }
 
 function getIosInstallMessage() {
-  if (!isSafariBrowser()) {
-    return "iPhone par install karne ke liye page Safari me open kijiye, phir Share > Add to Home Screen tap kijiye.";
-  }
+if (!isSafariBrowser()) {
+  return "To install on iPhone, open this page in Safari, then tap Share > Add to Home Screen.";
+}
 
-  return "iPhone Safari me Share button tap kijiye, Add to Home Screen choose kijiye, phir Add tap kijiye.";
+return "In iPhone Safari, tap the Share button, choose Add to Home Screen, then tap Add.";
 }

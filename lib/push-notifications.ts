@@ -35,6 +35,9 @@ type VapidConfig = {
 
 export async function notifyUser(userId: number, payload: PushPayload) {
   if (!userId) return;
+  await persistUserNotification(userId, payload).catch((error) => {
+    console.warn(`In-app notification save failed for user:${userId}:`, error);
+  });
   const rows = await queryRows<PushRow>("SELECT user_id, endpoint, payload FROM push_subscriptions WHERE user_id = ?", [userId]);
   await sendPushRows(rows, payload, `user:${userId}`);
 }
@@ -54,6 +57,18 @@ export async function notifyUsersByRole(role: "user" | "admin", payload: PushPay
 
 export async function notifyAdmins(payload: PushPayload) {
   await notifyUsersByRole("admin", { url: "/admin", tag: "konnectly-admin-action", ...payload });
+}
+
+async function persistUserNotification(userId: number, payload: PushPayload) {
+  const message = payload.body?.trim();
+  if (!message) return;
+  await executeQuery(
+    `
+      INSERT INTO notifications (user_id, title, message, type, url, tag)
+      VALUES (?, ?, ?, 'alert', ?, ?)
+    `,
+    [userId, payload.title?.trim() || "Konnectly Update", message, payload.url || null, payload.tag || null],
+  );
 }
 
 async function sendPushRows(rows: PushRow[], payload: PushPayload, label: string) {

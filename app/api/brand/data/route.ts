@@ -43,6 +43,7 @@ export async function GET() {
       queryRows<AnyRow>(
         `SELECT id, message, type, created_at
          FROM notifications
+         WHERE user_id IS NULL
          ORDER BY created_at DESC
          LIMIT 8`,
       ),
