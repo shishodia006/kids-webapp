@@ -679,6 +679,7 @@ function mapPointHistory(row: PointHistoryRow): AppPointHistory {
   const createdAt = dateStr(row.created_at);
   return {
     id: num(row.id),
+    kidId: num(row.kid_id),
     month: formatMonth(createdAt),
     source: str(row.source),
     points: num(row.points),
