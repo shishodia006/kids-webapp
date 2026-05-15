@@ -323,7 +323,7 @@ export default function BrandPanel() {
       <section className="relative mx-auto flex h-dvh w-full max-w-[430px] flex-col overflow-hidden bg-[#f7f5ff] text-[#171330] shadow-2xl md:rounded-[46px] md:border md:border-white/30">
         <BrandHeader brand={brand} currentTime={currentTime} activeTab={activeTab} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-24 pt-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className={`min-h-0 flex-1 overflow-y-auto px-4 pt-5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${activeTab === "Scan QR" ? "pb-25" : "pb-24"}`}>
           {activeTab === "Dashboard" && <Dashboard data={brandData} setActiveTab={setActiveTab} />}
           {activeTab === "Scan QR" && <ScanQr data={brandData} onVerified={refreshBrandData} />}
           {activeTab === "Opportunities" && <Opportunities data={brandData} />}
@@ -335,7 +335,7 @@ export default function BrandPanel() {
           href="https://wa.me/919810889180"
           target="_blank"
           rel="noreferrer"
-          className="absolute bottom-[92px] right-5 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-[#25d366] text-white shadow-[0_14px_34px_rgba(37,211,102,0.45)] ring-4 ring-white/80 transition hover:scale-105"
+          className={`absolute right-5 z-20 flex h-12 w-12 items-center justify-center rounded-full bg-[#25d366] text-white shadow-[0_14px_34px_rgba(37,211,102,0.45)] ring-4 ring-white/80 transition hover:scale-105 ${activeTab === "Scan QR" ? "bottom-[112px]" : "bottom-[92px]"}`}
           aria-label="Open WhatsApp support"
         >
          <svg width="35" height="35" viewBox="0 0 1024 1024" fill="none"><rect width="1024" height="1024" rx="265"></rect><path d="M522 141C320.419 141 157 304.419 157 506C157 572.322 174.689 634.507 205.606 688.101L157 871L346.617 826.173C398.664 854.744 458.429 871 522 871C723.581 871 887 707.581 887 506C887 304.419 723.581 141 522 141ZM522 805.624C460.998 805.624 404.254 787.388 356.919 756.079L244.891 784.61L276.314 677.536C242.322 628.944 222.376 569.801 222.376 506C222.376 340.52 356.52 206.376 522 206.376C687.48 206.376 821.624 340.52 821.624 506C821.624 671.48 687.48 805.624 522 805.624Z" fill="white"></path><path d="M607.527 554.187L695.836 595.825C699.892 597.737 702.488 601.847 702.123 606.315C701.163 617.934 696.506 641.226 675.626 662.099C616.692 721.033 510.876 654.36 506.577 651.778C480.554 637.799 455.815 619.09 432.374 595.642C408.933 572.201 390.217 547.462 376.238 521.439C373.656 517.14 306.983 411.317 365.917 352.39C386.796 331.51 410.082 326.853 421.701 325.893C426.169 325.528 430.279 328.124 432.192 332.18L473.829 420.489C475.802 424.667 474.937 429.635 471.666 432.899L440.627 463.938C433.915 470.65 431.942 481.1 436.565 489.393C447.887 509.705 463.115 529.259 480.764 547.252C498.757 564.894 518.318 580.129 538.623 591.451C546.917 596.075 557.366 594.108 564.078 587.389L595.117 556.35C598.381 553.086 603.35 552.221 607.527 554.187Z" fill="white"></path></svg>
@@ -672,6 +672,7 @@ function Dashboard({ data, setActiveTab }: { data: BrandData | null; setActiveTa
 
 function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () => Promise<void> }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const qrUploadInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const qrScannerRef = useRef<{ stop: () => void; destroy: () => void } | null>(null);
   const busyRef = useRef(false);
@@ -774,24 +775,24 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
 
   async function scanQrImage(file: File | undefined) {
     if (!file || busy) return;
-    setStatus("QR image scan kar rahe hain...");
+    setStatus("Scanning QR image...");
     setVerified(null);
 
     try {
       const scanned = await scanVoucherImage(file);
       const code = normalizeVoucherCode(scanned);
-      if (!code) throw new Error("Unable to read the QR image. Please enter the code manually.");
+      if (!code) throw new Error("Unable to read the QR image. Please upload a clear, uncropped voucher QR or enter the code manually.");
       await verifyCode(code);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Unable to read the QR image. Please enter the code manually.");
+      setStatus(error instanceof Error ? error.message : "Unable to read the QR image. Please upload a clear, uncropped voucher QR or enter the code manually.");
     }
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <Title title="Scan & Approve" subtitle={`${activeIssued.length} active vouchers available`} />
       <Card className="overflow-hidden bg-[#171330] p-0 text-white">
-        <div className="relative rounded-2xl aspect-[4/5] bg-[#2a2252]">
+        <div className="relative h-[238px] rounded-2xl bg-[#2a2252]">
           {scannerOn ? (
             <>
               <video ref={videoRef} className="h-full w-full object-cover" playsInline muted />
@@ -814,18 +815,22 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
         </div>
       </Card>
 
-      <Card className="bg-white">
+      <Card className="bg-white p-3.5">
         <h3 className="font-black">QR not working? Enter manually</h3>
-        <div className="mt-4 grid gap-2">
-          <label className="flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#bdb2f4] bg-[#f7f6ff] px-4 text-sm font-black text-[#5b4ec8]">
+        <div className="mt-3 grid gap-2">
+          <button
+            onClick={() => qrUploadInputRef.current?.click()}
+            className="flex min-h-11 items-center justify-center gap-2 rounded-xl border-2 border-dashed border-[#bdb2f4] bg-[#f7f6ff] px-4 text-sm font-black text-[#5b4ec8]"
+            type="button"
+          >
             <Upload size={18} />
             Upload QR Photo
-            <input type="file" accept="image/*" capture="environment" className="sr-only" onChange={(event) => { void scanQrImage(event.target.files?.[0]); event.target.value = ""; }} />
-          </label>
+          </button>
+          <input ref={qrUploadInputRef} type="file" accept="image/*" capture="environment" className="hidden" tabIndex={-1} onChange={(event) => { event.currentTarget.blur(); void scanQrImage(event.target.files?.[0]); event.target.value = ""; }} />
         </div>
-        <div className="mt-3 flex gap-2">
-          <input value={manualCode} onChange={(event) => setManualCode(event.target.value.toUpperCase())} className="min-w-0 flex-1 rounded-xl border-2 border-[#e3e0f4] bg-[#f7f6ff] px-4 py-3 text-sm font-black uppercase outline-none focus:border-[#6655cf]" placeholder="KON-XXX-XXXX" />
-          <button onClick={() => verifyCode()} disabled={busy || !manualCode.trim()} className="rounded-xl bg-[#6655cf] px-5 text-sm font-black text-white disabled:opacity-50" type="button">
+        <div className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-2">
+          <input value={manualCode} onChange={(event) => setManualCode(event.target.value.toUpperCase())} className="h-12 min-w-0 rounded-xl border-2 border-[#e3e0f4] bg-[#f7f6ff] px-4 text-sm font-black uppercase outline-none focus:border-[#6655cf]" placeholder="KON-XXX-XXXX" />
+          <button onClick={() => verifyCode()} disabled={busy || !manualCode.trim()} className="h-12 rounded-xl bg-[#6655cf] px-4 text-sm font-black text-white disabled:opacity-50" type="button">
             {busy ? "..." : "Verify"}
           </button>
         </div>
@@ -833,9 +838,9 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
         {verified && <RedemptionRow item={verified} />}
       </Card>
 
-      <Card className="bg-white">
+      <Card className="bg-white p-3.5">
         <h3 className="font-black">Pending Vouchers</h3>
-        <div className="mt-4 grid gap-3">
+        <div className="mt-3 grid gap-3">
           {activeIssued.slice(0, 5).map((item) => (
             <div key={item.id} className="grid gap-2 rounded-[18px] border border-[#ebe7f7] bg-[#fbfaff] p-2">
               <RedemptionRow item={item} />
@@ -844,7 +849,7 @@ function ScanQr({ data, onVerified }: { data: BrandData | null; onVerified: () =
               </button>
             </div>
           ))}
-          {activeIssued.length === 0 && <p className="text-sm font-bold text-zinc-500">No issued vouchers waiting right now.</p>}
+          {activeIssued.length === 0 && <p className="rounded-2xl bg-[#f7f6ff] px-4 py-3 text-sm font-bold text-zinc-500">No issued vouchers waiting right now.</p>}
         </div>
       </Card>
     </div>

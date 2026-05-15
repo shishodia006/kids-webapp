@@ -98,6 +98,7 @@ export type AppHeroSlide = {
 
 export type AppRewardHistory = {
   id: number;
+  kidId: number;
   month: string;
   brandName: string;
   pointsSpent: number;
@@ -110,6 +111,7 @@ export type AppRewardHistory = {
 
 export type AppPointHistory = {
   id: number;
+  kidId: number;
   month: string;
   source: string;
   points: number;
@@ -661,6 +663,7 @@ function mapRewardHistory(row: RewardHistoryRow): AppRewardHistory {
   const createdAt = dateStr(row.created_at);
   return {
     id: num(row.id),
+    kidId: num(row.kid_id),
     month: formatMonth(createdAt),
     brandName: str(row.brand_name) || "Reward",
     pointsSpent: num(row.points_spent),

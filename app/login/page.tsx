@@ -103,6 +103,12 @@ export default function LoginPage() {
               Admin Login
             </Link>
           </p>
+          <p className="text-center text-[12px] font-black uppercase tracking-[0.08em] text-zinc-500">
+            Brand?{" "}
+            <Link href="/brand" className="text-[#5f4bd3]">
+              Brand Login
+            </Link>
+          </p>
         </form>
 
         {status && <p className="mx-auto mt-4 max-w-[360px] text-sm font-black text-[#6d5fde] text-center">{status}</p>}

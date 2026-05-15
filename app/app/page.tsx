@@ -598,7 +598,7 @@ function HomeContent({
         </button>
       </section>
 
-      <ActiveVouchers history={data.rewardHistory} onOpenVoucher={onOpenVoucher} compact />
+      <ActiveVouchers history={filterRewardHistoryForActiveKid(data)} onOpenVoucher={onOpenVoucher} compact />
 
       <ActionCard tone="gold" icon={<Gift size={24} />} title="Refer to Earn Points!" body="Invite a family and share your KonnektKode" onClick={onOpenRefer} />
       {notificationPermission !== "granted" && notificationPermission !== "unsupported" && (
@@ -988,8 +988,8 @@ function AccountScreen({
         </ProfileAccordionCard>
       </section>
 
-      <ActiveVouchers history={data.rewardHistory} onOpenVoucher={onOpenVoucher} />
-      <RewardsHistory history={data.rewardHistory} />
+      <ActiveVouchers history={filterRewardHistoryForActiveKid(data)} onOpenVoucher={onOpenVoucher} />
+      <RewardsHistory history={filterRewardHistoryForActiveKid(data)} activeKidName={data.activeKid?.childName || ""} />
       <div className="space-y-2.5">
         <AccountActionCard
           icon={<Download size={19} />}
@@ -1475,7 +1475,7 @@ function ActiveVouchers({ history, onOpenVoucher, compact }: { history: AppRewar
   );
 }
 
-function RewardsHistory({ history }: { history: AppRewardHistory[] }) {
+function RewardsHistory({ history, activeKidName }: { history: AppRewardHistory[]; activeKidName?: string }) {
   const grouped = history.reduce<Record<string, AppRewardHistory[]>>((acc, item) => {
     acc[item.month] = [...(acc[item.month] ?? []), item];
     return acc;
@@ -1485,7 +1485,7 @@ function RewardsHistory({ history }: { history: AppRewardHistory[] }) {
     <section>
       <h2 className="mb-2.5 text-sm font-black text-[#292444]">Rewards History</h2>
       <div className="space-y-2.5">
-        {history.length === 0 && <EmptyState text="No vouchers or redemptions yet." />}
+        {history.length === 0 && <EmptyState text={`No vouchers or redemptions yet${activeKidName ? ` for ${activeKidName}` : ""}.`} />}
         {Object.entries(grouped).map(([month, entries]) => (
           <div key={month} className="rounded-[18px] bg-white p-3.5 shadow-sm ring-1 ring-[#e9e4fb]">
             <h3 className="text-xs font-black text-[#292444]">{month}</h3>
@@ -1867,7 +1867,8 @@ function WidgetPrompt({ onClose, onInstallApp, installWorking, installMessage, a
 }
 
 function PointsHistorySheet({ data, onClose }: { data: AppData; onClose: () => void }) {
-  const history = data.pointHistory ?? [];
+  const activeKid = data.activeKid;
+  const history = activeKid ? (data.pointHistory ?? []).filter((entry) => entry.kidId === activeKid.id) : (data.pointHistory ?? []);
   const earned = history.reduce((total, entry) => total + Math.max(0, entry.points), 0);
   const used = history.reduce((total, entry) => total + Math.abs(Math.min(0, entry.points)), 0);
   const grouped = history.reduce<Record<string, AppPointHistory[]>>((acc, item) => {
@@ -1884,11 +1885,12 @@ function PointsHistorySheet({ data, onClose }: { data: AppData; onClose: () => v
 
         <div className="px-5 pb-4 pt-5">
           <h2 className="text-xl font-black text-[#292444]">Konnect Points History</h2>
+          {activeKid && <p className="mt-1 text-xs font-black text-[#8d89a6]">Showing {activeKid.childName}&apos;s points only</p>}
           <div className="mt-5 overflow-hidden rounded-[22px] bg-[#4d39b6] p-4 text-white">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-white/55">Current Balance</p>
-                <p className="mt-1 text-3xl font-black">{data.user.konnectPoints} pts</p>
+                <p className="mt-1 text-3xl font-black">{activeKid?.konnektPoints ?? data.user.konnectPoints} pts</p>
               </div>
               <div className="grid h-16 w-16 place-items-center rounded-full bg-[#f6c400] text-xl font-black text-[#292444]">
                 <Star size={26} />
@@ -1906,7 +1908,7 @@ function PointsHistorySheet({ data, onClose }: { data: AppData; onClose: () => v
             <div className="grid place-items-center rounded-[22px] border-2 border-dashed border-[#e9e4fb] bg-[#f7f5ff] px-5 py-8 text-center">
               <History size={34} className="text-[#5f4bd2]" />
               <p className="mt-3 text-sm font-black text-[#292444]">No point history yet.</p>
-              <p className="mt-1 text-xs font-bold text-[#8d89a6]">Bookings, attendance, referrals and rewards will appear here.</p>
+              <p className="mt-1 text-xs font-bold text-[#8d89a6]">Bookings, attendance, referrals and rewards for {activeKid?.childName || "this profile"} will appear here.</p>
             </div>
           ) : (
             <div className="space-y-5">
@@ -1962,17 +1964,20 @@ function ReferBottomSheet({ data, onClose }: { data: AppData; onClose: () => voi
     data.user.konnektKode || data.activeKid?.konnektKode || "KK-XXXXX";
 
   const name = data.user.parentName || "a parent";
+  const referEmojis = String.fromCodePoint(0x1f389, 0x1f381, 0x1f31f);
 
   const referText = `Hi! I'm ${name}, a proud Konnectly member.
 
-Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more! 🥳🎁🧑‍🧑‍🧒‍🧒
+Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more! ${referEmojis}
 
 Join us and use my KonnektKode ${referCode}.
 
 Bonus points unlock after the first child profile is verified:
 ${data.referralUrl}`;
 
-  const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(referText)}`;
+  function shareReferral() {
+    window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(referText)}`, "_blank", "noopener,noreferrer");
+  }
   
 
   return (
@@ -1985,14 +1990,14 @@ ${data.referralUrl}`;
         <p className="mt-2 text-sm font-bold text-[#8d89a6]">Share with a family. Points unlock after their first child profile is verified.</p>
         <div className="mt-5 rounded-[18px] border-2 border-[#e6b800] bg-[#fff8df] p-4 text-[#161332]">
           <p className="text-sm font-black">Hi! I&apos;m {name}, a proud Konnectly member.</p>
-          <p className="mt-5 text-sm font-black leading-relaxed">Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more.</p>
+          <p className="mt-5 text-sm font-black leading-relaxed">Konnectly is a hyperlocal community platform for kids and parents - activities, rewards and more! {referEmojis}</p>
           <p className="mt-5 text-sm font-black leading-relaxed">Join us and use my KonnektKode:</p>
           <div className="mt-2 inline-block rounded-full bg-[#4d39b6] px-4 py-2 text-sm font-black tracking-[0.18em] text-[#f6c400]">{referCode}</div>
           <p className="mt-5 break-words text-xs font-black leading-relaxed text-[#8d89a6]">{data.referralUrl}</p>
         </div>
-        <a href={whatsappUrl} target="_blank" rel="noreferrer" className="mt-5 flex h-13 items-center justify-center gap-3 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white shadow-xl shadow-[#25d366]/30">
+        <button onClick={shareReferral} className="mt-5 flex h-13 w-full items-center justify-center gap-3 rounded-full bg-[#25d366] px-5 py-3 text-sm font-black text-white shadow-xl shadow-[#25d366]/30" type="button">
           <WhatsAppIcon /> Share on WhatsApp
-        </a>
+        </button>
       </div>
     </div>
   );
@@ -2577,6 +2582,11 @@ function rewardEntryToVoucher(entry: AppRewardHistory): Voucher {
     qrCode: entry.qrCode,
     expiresAt: entry.expiresAt,
   };
+}
+
+function filterRewardHistoryForActiveKid(data: AppData) {
+  const history = data.rewardHistory ?? [];
+  return data.activeKid ? history.filter((entry) => entry.kidId === data.activeKid?.id) : history;
 }
 
 function formatVoucherValidity(entry: AppRewardHistory) {

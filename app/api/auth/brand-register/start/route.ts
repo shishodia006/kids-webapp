@@ -15,8 +15,14 @@ export async function POST(request: Request) {
     }
 
     const existing = await queryOne<ExistingBrandUser>(
-      "SELECT id FROM brand_users WHERE partner_mobile = ? LIMIT 1",
-      [details.value.mobile],
+      `
+        SELECT id
+        FROM brand_users
+        WHERE partner_mobile = ?
+           OR RIGHT(REGEXP_REPLACE(COALESCE(partner_mobile, ''), '\\D', '', 'g'), 10) = ?
+        LIMIT 1
+      `,
+      [details.value.mobile, details.value.mobile],
     );
 
     if (existing) {

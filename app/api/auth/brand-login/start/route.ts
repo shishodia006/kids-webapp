@@ -22,8 +22,14 @@ export async function POST(request: Request) {
 
     if (requestedPhone) {
       const brandUser = await queryOne<BrandUserRow>(
-        "SELECT id, brand_id, email, password, partner_mobile, is_active FROM brand_users WHERE partner_mobile = ? LIMIT 1",
-        [requestedPhone],
+        `
+          SELECT id, brand_id, email, password, partner_mobile, is_active
+          FROM brand_users
+          WHERE partner_mobile = ?
+             OR RIGHT(REGEXP_REPLACE(COALESCE(partner_mobile, ''), '\\D', '', 'g'), 10) = ?
+          LIMIT 1
+        `,
+        [requestedPhone, requestedPhone],
       );
 
       if (!brandUser) {
